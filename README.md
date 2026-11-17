@@ -8,6 +8,7 @@ LifeOS V2 database, Build Stage 1.
 |---|---|
 | `contract/lifeos-database-contract.md` | The Database Contract. AI Agents read it to choose which function to call, what to send and what comes back. |
 | `supabase/migrations/` | The migration SQL. It creates the `lifeos` schema, its tables and every Contract function. It runs on any Supabase project and changes nothing outside `lifeos`. |
+| [`supabase/IMPLEMENTATION-NOTES.md`](supabase/IMPLEMENTATION-NOTES.md) | The SQL implementation notes. AI Agents read them before they write or change a migration. |
 | `tests/` | One SQL test file per Module. Each file runs in one transaction that ends in `rollback`. `tests/README.md` lists the coverage. |
 
 ## Apply the migrations

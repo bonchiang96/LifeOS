@@ -14,6 +14,10 @@
 --   9.  story_person_create_search_read_delete
 --   10. storyline_search_by_story_persons
 --   11. storyline_update_delete_and_links
+--   12. reading_remark_add_and_update_leave_reading_updated_at_unchanged
+--
+-- Test setup that the Contract has no function for: test 12 moves updated_at of one Reading
+-- 5 days back, so a change of updated_at shows inside one transaction.
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -415,6 +419,27 @@ begin
   perform pg_temp.chk((lifeos.storyline_search(jsonb_build_object('story_person_ids', jsonb_build_array(a)))->>'returned_count')::int = 0, 'a deleted Storyline is hidden from search');
   perform pg_temp.chk((lifeos.storyline_search(jsonb_build_object('story_person_ids', jsonb_build_array(a), 'include_deleted', true))->>'returned_count')::int = 1, 'include_deleted shows it');
   perform pg_temp.chk(lifeos.storyline_read((s->>'id')::uuid)->>'deleted_at' is not null, 'storyline_read still returns it');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 12. Reading Remarks leave the Reading's updated_at unchanged -------------------------------
+do $t$
+declare t constant text := 'reading_remark_add_and_update_leave_reading_updated_at_unchanged';
+  d jsonb; rid uuid; r jsonb; before_updated timestamptz;
+begin
+  d := lifeos.divination_record_save('{"readings":[{"question":"Q12","method":"tarot","result_text":"R12"}]}');
+  rid := (d->'readings'->0->>'id')::uuid;
+  -- Test setup: move updated_at 5 days back (one transaction has one clock value).
+  update lifeos.readings set updated_at = updated_at - interval '5 days' where id = rid;
+  select updated_at into before_updated from lifeos.readings where id = rid;
+  r := lifeos.reading_remark_add(rid, '{"text":"first thought"}');
+  perform pg_temp.chk((select updated_at from lifeos.readings where id = rid) = before_updated, 'reading_remark_add leaves updated_at unchanged');
+  perform pg_temp.chk((r->>'updated_at')::timestamptz = before_updated, 'the returned Reading carries the unchanged updated_at');
+  perform pg_temp.chk(jsonb_array_length(r->'remark_entries') = 1, 'the entry is added');
+  r := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', r->'remark_entries'->0->>'entry_id', 'text', 'corrected thought'));
+  perform pg_temp.chk((select updated_at from lifeos.readings where id = rid) = before_updated, 'reading_remark_update leaves updated_at unchanged');
+  perform pg_temp.chk(r->'remark_entries'->0->>'text' = 'corrected thought', 'the entry is corrected');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

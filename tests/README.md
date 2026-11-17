@@ -11,11 +11,11 @@ The tests call only functions of the schema `lifeos`. Error tests compare the ex
 | File | Module | Contract chapter | Tests |
 |---|---|---|---|
 | `02_memory.sql` | LifeOS Memory | 2 | 5 |
-| `03_notebook.sql` | Notebook | 3 | 6 |
+| `03_notebook.sql` | Notebook | 3 | 8 |
 | `04_personal_records.sql` | Personal Records | 4 | 16 |
 | `05_subject.sql` | Subject | 5 | 7 |
-| `06_financial_records.sql` | Financial Records | 6 | 12 |
-| `07_divination_reflection.sql` | Divination & Reflection | 7 | 11 |
+| `06_financial_records.sql` | Financial Records | 6 | 13 |
+| `07_divination_reflection.sql` | Divination & Reflection | 7 | 12 |
 | `08_communication_assistant.sql` | Communication Assistant | 8 | 12 |
 | `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | 9 | 8 |
 
@@ -39,10 +39,13 @@ The result is a JSON object. Its `rows` array holds one row per test with `test`
 
 ## Direct table access
 
-Two setups use a direct `update` because the Contract has no function for them. Both change a timestamp inside the transaction, so the rollback removes them.
+Some setups use a direct `update` or `delete` because the Contract has no function for them. Each change stays inside the transaction, so the rollback removes it.
 
 1. `04_personal_records.sql`, test 13, moves `created_at` of one Note 10 days back. A transaction has one clock value, so this is the only way to tell the Note date from today.
-2. `02_memory.sql` test 4 and `08_communication_assistant.sql` tests 10 and 11 spread `updated_at` and `finalized_at` to prove the newest-first ordering.
+2. `04_personal_records.sql`, test 15, moves `updated_at` of one Schedule 5 days back. This shows that a Remark leaves `updated_at` unchanged.
+3. `07_divination_reflection.sql`, test 12, moves `updated_at` of one Reading 5 days back. This shows that a Reading Remark leaves `updated_at` unchanged.
+4. `03_notebook.sql`, test 8, deletes the seeded `note_types` row, so the first read creates it with the five default Note Types.
+5. `02_memory.sql` test 4 and `08_communication_assistant.sql` tests 10 and 11 spread `updated_at` and `finalized_at` to prove the newest-first ordering.
 
 ## Coverage
 
@@ -53,12 +56,14 @@ Two setups use a direct `update` because the Contract has no function for them. 
 | Memory search by keyword, categories and tags | `memory_search_keyword_categories_tags` | `02_memory.sql` |
 | Memory search order, paging and deleted Memory | `memory_search_order_paging_and_deleted` | `02_memory.sql` |
 | Memory update and delete | `memory_update_partial_and_delete` | `02_memory.sql` |
-| Notebook initialise on read, catalog names | `notebook_initialise_on_read_catalog_names` | `03_notebook.sql` |
+| Notebook initialise on read, empty catalog Notebooks | `notebook_initialise_on_read_catalog_names` | `03_notebook.sql` |
 | The defaults Notebook holds `currency: MYR` | `notebook_defaults_holds_currency_myr` | `03_notebook.sql` |
 | Notebook with a free key or a supplied name | `notebook_custom_key_and_name` | `03_notebook.sql` |
 | Notebook key format | `notebook_key_format_rejected` | `03_notebook.sql` |
 | Notebook update replaces content | `notebook_update_replaces_and_initialises` | `03_notebook.sql` |
 | Notebook catalog list | `notebook_list_keyword_and_order` | `03_notebook.sql` |
+| Seeded `note_types` Notebook holds five Note Types | `notebook_note_types_seed_holds_five_default_note_types` | `03_notebook.sql` |
+| New `note_types` Notebook starts with five Note Types | `notebook_note_types_created_on_read_starts_with_five_default_note_types` | `03_notebook.sql` |
 | Schedule create | `schedule_create_defaults_and_validation` | `04_personal_records.sql` |
 | Schedule series, create and extend | `schedule_series_create_and_extend` | `04_personal_records.sql` |
 | Schedule "this one" | `schedule_update_this_one_only` | `04_personal_records.sql` |
@@ -71,9 +76,9 @@ Two setups use a direct `update` because the Contract has no function for them. 
 | Event delete returns the Schedule to Planned | `event_delete_returns_schedule_to_planned` | `04_personal_records.sql` |
 | Observation linked to an Event | `observation_linked_to_event` | `04_personal_records.sql` |
 | Observation correction keeps its time | `observation_update_keeps_observed_time` | `04_personal_records.sql` |
-| Note date after an edit, unchanged after a Remark | `note_date_after_edit_unchanged_after_remark` | `04_personal_records.sql` |
+| Note date and updated_at after an edit, unchanged after a Remark | `note_date_after_edit_unchanged_after_remark` | `04_personal_records.sql` |
 | Record links ignore deleted targets | `record_links_ignore_deleted_targets` | `04_personal_records.sql` |
-| Remark on a Record | `record_add_remark_rules` | `04_personal_records.sql` |
+| Remark on a Record, updated_at unchanged | `record_add_remark_rules` | `04_personal_records.sql` |
 | Soft delete, read and search of deleted Records | `soft_delete_read_and_search_deleted` | `04_personal_records.sql` |
 | Subject create and single user Subject | `subject_create_defaults_and_single_user` | `05_subject.sql` |
 | Subject Discovery search | `subject_search_compact_and_exact_first` | `05_subject.sql` |
@@ -93,6 +98,7 @@ Two setups use a direct `update` because the Contract has no function for them. 
 | Expense search | `expense_search_filters_and_order` | `06_financial_records.sql` |
 | The 17 Categories | `expense_category_list_has_17_in_order` | `06_financial_records.sql` |
 | Spending report order and per-currency totals | `expense_spending_report_order_and_per_currency_totals` | `06_financial_records.sql` |
+| Adjustment Lines stay out of by_category and by_tag | `expense_spending_report_leaves_adjustment_lines_out_of_category_and_tag` | `06_financial_records.sql` |
 | Credit purchase and repayment | `credit_purchase_is_one_expense_and_repayment_is_not_in_report` | `06_financial_records.sql` |
 | Divination save with Readings and Analyses | `divination_save_readings_and_analyses` | `07_divination_reflection.sql` |
 | Divination save validation | `divination_save_rejects_invalid_input` | `07_divination_reflection.sql` |
@@ -100,6 +106,7 @@ Two setups use a direct `update` because the Contract has no function for them. 
 | Divination search by Subject and Story Person | `divination_search_by_subject_and_story_person` | `07_divination_reflection.sql` |
 | Divination Record full read | `divination_record_read_full_view` | `07_divination_reflection.sql` |
 | Reading Remark | `reading_remark_add_and_update` | `07_divination_reflection.sql` |
+| Reading Remark leaves updated_at unchanged | `reading_remark_add_and_update_leave_reading_updated_at_unchanged` | `07_divination_reflection.sql` |
 | Later Reading, later Analysis, Story Person set | `reading_create_analysis_add_and_story_persons_set` | `07_divination_reflection.sql` |
 | Divination and Reading delete | `divination_delete_cascades_reading_delete_keeps_combined` | `07_divination_reflection.sql` |
 | Story Person | `story_person_create_search_read_delete` | `07_divination_reflection.sql` |

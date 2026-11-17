@@ -15,6 +15,7 @@
 --   10. expense_category_list_has_17_in_order
 --   11. expense_spending_report_order_and_per_currency_totals
 --   12. credit_purchase_is_one_expense_and_repayment_is_not_in_report
+--   13. expense_spending_report_leaves_adjustment_lines_out_of_category_and_tag
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -443,18 +444,18 @@ begin
   perform pg_temp.chk(p->1->>'payment_method_subject_id' = card::text and (p->1->>'total')::numeric = 95, 'second: Card 125 - 30 = 95');
   perform pg_temp.chk(p->2->>'payment_method_subject_id' = cash::text and (p->2->>'total')::numeric = 12, 'third: Cash 12');
 
-  -- part 3: categories over purchase Lines, Refund Lines excluded, total descending
+  -- part 3: categories over purchase item Lines, Adjustment and Refund Lines excluded, total descending
   p := myr->'parts'->2->'items';
-  perform pg_temp.chk((select array_agg(x->>'category' order by ord) from jsonb_array_elements(p) with ordinality as q(x, ord)) = array['electronics','household','food','other','discount'],
+  perform pg_temp.chk((select array_agg(x->>'category' order by ord) from jsonb_array_elements(p) with ordinality as q(x, ord)) = array['electronics','household','food'],
     'categories in descending order of total, got ' || (select string_agg(x->>'category', ',' order by ord) from jsonb_array_elements(p) with ordinality as q(x, ord)));
   perform pg_temp.chk((select (x->>'total')::numeric from jsonb_array_elements(p) x where x->>'category' = 'food') = 52.02, 'food 40 + 12.02 = 52.02');
-  perform pg_temp.chk((select (x->>'total')::numeric from jsonb_array_elements(p) x where x->>'category' = 'discount') = -40, 'adjustment Lines count under their stored Category: discount -40');
-  perform pg_temp.chk((select (x->>'total')::numeric from jsonb_array_elements(p) x where x->>'category' = 'other') = -0.02, 'other -0.02');
+  perform pg_temp.chk((select (x->>'total')::numeric from jsonb_array_elements(p) x where x->>'category' = 'electronics') = 200, 'electronics 200');
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(p) x where x->>'category' in ('discount','other')), 'Adjustment Lines add no Category: no discount and no other');
   perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(p) x where x->>'category' is null), 'Refund Lines are excluded from categories');
 
   -- part 4: tags, overlapping, total descending, Refund Lines excluded
   p := myr->'parts'->3->'items';
-  perform pg_temp.chk((select array_agg(x->>'tag' order by ord) from jsonb_array_elements(p) with ordinality as q(x, ord)) = array['weekend','snack','voucher'], 'tags in descending order of total');
+  perform pg_temp.chk((select array_agg(x->>'tag' order by ord) from jsonb_array_elements(p) with ordinality as q(x, ord)) = array['weekend','snack'], 'tags in descending order of total, the Adjustment Tag voucher left out');
   perform pg_temp.chk((select (x->>'total')::numeric from jsonb_array_elements(p) x where x->>'tag' = 'weekend') = 140, 'weekend 40 + 100 = 140');
   perform pg_temp.chk((select (x->>'total')::numeric from jsonb_array_elements(p) x where x->>'tag' = 'snack') = 52.02, 'a Line with several Tags counts under each Tag: snack 52.02');
 
@@ -502,6 +503,35 @@ begin
   perform pg_temp.chk((myr->'parts'->0->>'total')::numeric = 60, 'the credit purchase counts once (60) and the repayment adds nothing, got ' || (myr->'parts'->0->>'total'));
   perform pg_temp.chk(jsonb_array_length(myr->'parts'->1->'items') = 1 and myr->'parts'->1->'items'->0->>'payment_method_subject_id' = pl::text, 'only the PayLater Payment Method appears');
   perform pg_temp.chk(x->>'transaction_date' = '2033-03-05', 'the purchase keeps its original Transaction Date');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 13. Adjustment Lines stay out of by_category and by_tag; part 5 still sums them ------------
+do $t$
+declare t constant text := 'expense_spending_report_leaves_adjustment_lines_out_of_category_and_tag';
+  pm uuid := pg_temp.mk_subject('Adj Card', 'payment method');
+  x jsonb; rep jsonb; myr jsonb; cats jsonb; tags jsonb; adj jsonb;
+begin
+  x := lifeos.expense_create(jsonb_build_object('transaction_date','2034-04-05','merchant_name','Adj Shop','payment_method_subject_id', pm,'expense_total',70,'currency','MYR',
+        'lines', jsonb_build_array(
+          jsonb_build_object('line_type','item','item_description','Mug','unit_price',80,'line_total',80,'category','household','tags',jsonb_build_array('kitchen')),
+          jsonb_build_object('line_type','adjustment','item_description','Coupon','unit_price',-10,'line_total',-10,'category','discount','tags',jsonb_build_array('adjonly')))));
+  rep := lifeos.expense_spending_report('{"from_date":"2034-04-01","to_date":"2034-04-30"}');
+  select c into myr from jsonb_array_elements(rep->'currencies') c where c->>'currency' = 'MYR';
+  cats := myr->'parts'->2->'items';
+  tags := myr->'parts'->3->'items';
+  adj := myr->'parts'->4;
+  perform pg_temp.chk(jsonb_array_length(cats) = 1 and cats->0->>'category' = 'household' and (cats->0->>'total')::numeric = 80,
+    'by_category holds only household 80, got ' || cats::text);
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(cats) c where c->>'category' = 'discount'), 'the Adjustment Category discount is absent from by_category');
+  perform pg_temp.chk(jsonb_array_length(tags) = 1 and tags->0->>'tag' = 'kitchen' and (tags->0->>'total')::numeric = 80,
+    'by_tag holds only kitchen 80, got ' || tags::text);
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(tags) g where g->>'tag' = 'adjonly'), 'a Tag used only on an Adjustment Line is absent from by_tag');
+  perform pg_temp.chk((adj->>'total')::numeric = -10, 'part 5 still sums the Adjustment Line: -10, got ' || (adj->>'total'));
+  perform pg_temp.chk(jsonb_array_length(adj->'items') = 1 and adj->'items'->0->>'merchant_name' = 'Adj Shop' and (adj->'items'->0->>'total')::numeric = -10,
+    'part 5 lists Adj Shop -10');
+  perform pg_temp.chk((myr->'parts'->0->>'total')::numeric = 70, 'part 1 total_spent is unchanged: 70, got ' || (myr->'parts'->0->>'total'));
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

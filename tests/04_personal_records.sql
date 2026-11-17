@@ -22,7 +22,9 @@
 --
 -- Test setup that the Contract has no function for: test 13 moves created_at of
 -- one Note into the past, so the Note date can be told apart from today inside a
--- single transaction. Every other step calls Contract functions only.
+-- single transaction. Test 15 moves updated_at of one Schedule 5 days back, so a
+-- change of updated_at shows inside one transaction. Every other step calls Contract
+-- functions only.
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
 begin;
@@ -460,7 +462,7 @@ begin
   r := lifeos.record_add_remark('note', nid, '  Still feeling calm  ');
   perform pg_temp.chk(r->>'note_date' = (td - 10)::text, 'a Remark leaves the Note date unchanged');
   perform pg_temp.chk(r->>'edited_at' is null, 'a Remark leaves edited_at null');
-  perform pg_temp.chk((r->>'updated_at')::timestamptz > before_updated, 'a Remark sets updated_at');
+  perform pg_temp.chk((r->>'updated_at')::timestamptz = before_updated, 'a Remark leaves updated_at unchanged');
   perform pg_temp.chk(r->'remarks'->0->>'text' = 'Still feeling calm', 'Remark text is trimmed');
 
   u := lifeos.note_update(nid, '{"content":"Felt calm and rested after the walk"}');
@@ -536,10 +538,14 @@ end $t$;
 -- 15. Remarks: append, validation, Records that cannot take a Remark --------------
 do $t$
 declare t constant text := 'record_add_remark_rules';
-  s jsonb; r jsonb; e jsonb;
+  s jsonb; r jsonb; e jsonb; before_updated timestamptz;
 begin
   s := lifeos.schedule_create('{"title":"Visit museum","planned_date":"2032-02-01"}');
+  -- Test setup: move updated_at 5 days back (one transaction has one clock value).
+  update lifeos.schedules set updated_at = updated_at - interval '5 days' where id = (s->>'id')::uuid;
+  select updated_at into before_updated from lifeos.schedules where id = (s->>'id')::uuid;
   r := lifeos.record_add_remark('schedule', (s->>'id')::uuid, '  bring the camera ');
+  perform pg_temp.chk((select updated_at from lifeos.schedules where id = (s->>'id')::uuid) = before_updated, 'a Remark leaves updated_at unchanged');
   perform pg_temp.chk(jsonb_array_length(r->'remarks') = 1 and r->'remarks'->0->>'text' = 'bring the camera', 'one trimmed Remark appended');
   perform pg_temp.chk(r->'remarks'->0->>'timestamp' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', 'the Remark has an ISO 8601 timestamp');
   r := lifeos.record_add_remark('schedule', (s->>'id')::uuid, 'and the tickets');

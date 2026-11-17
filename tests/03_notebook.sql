@@ -8,6 +8,11 @@
 --   4. notebook_key_format_rejected
 --   5. notebook_update_replaces_and_initialises
 --   6. notebook_list_keyword_and_order
+--   7. notebook_note_types_seed_holds_five_default_note_types
+--   8. notebook_note_types_created_on_read_starts_with_five_default_note_types
+--
+-- Test setup that the Contract has no function for: test 8 deletes the seeded note_types
+-- row, so the first read creates it. The rollback restores the row.
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- Run: see tests/README.md.
@@ -68,14 +73,14 @@ begin insert into t_ids values (p_k, p_v) on conflict (k) do update set v = excl
 -- Quote helper for building statements that contain a uuid.
 create function pg_temp.q(p uuid) returns text language sql as $f$ select quote_literal(p::text) || '::uuid' $f$;
 
--- 1. A catalog Notebook that does not exist is created empty on read ------------
+-- 1. A catalog Notebook without named defaults is created empty on read ----------
 do $t$
 declare t constant text := 'notebook_initialise_on_read_catalog_names';
   k text; expected_name text; r jsonb; r2 jsonb;
 begin
-  foreach k in array array['subject_types','subject_tags','expense_tags','note_types'] loop
+  foreach k in array array['subject_types','subject_tags','expense_tags'] loop
     expected_name := case k when 'subject_types' then 'Subject Types' when 'subject_tags' then 'Subject Tags'
-                            when 'expense_tags' then 'Expense Tags' else 'Note Types' end;
+                            else 'Expense Tags' end;
     r := lifeos.notebook_read(k);
     perform pg_temp.chk((r->>'initialised')::boolean, k || ': first read initialises');
     perform pg_temp.chk(r->>'name' = expected_name, k || ': catalog name is ' || expected_name || ', got ' || (r->>'name'));
@@ -133,16 +138,16 @@ do $t$
 declare t constant text := 'notebook_update_replaces_and_initialises';
   r jsonb;
 begin
-  perform lifeos.notebook_read('note_types');
-  r := lifeos.notebook_update('note_types', '{"content":"Idea\nFeeling\nExperience"}');
+  perform lifeos.notebook_read('zz_update_key');
+  r := lifeos.notebook_update('zz_update_key', '{"content":"Idea\nFeeling\nExperience"}');
   perform pg_temp.chk(r->>'content' = E'Idea\nFeeling\nExperience', 'content replaced');
-  r := lifeos.notebook_update('note_types', '{"content":"Idea"}');
+  r := lifeos.notebook_update('zz_update_key', '{"content":"Idea"}');
   perform pg_temp.chk(r->>'content' = 'Idea', 'a later update replaces the whole content');
-  r := lifeos.notebook_update('note_types', '{"name":"Types of Note"}');
+  r := lifeos.notebook_update('zz_update_key', '{"name":"Types of Note"}');
   perform pg_temp.chk(r->>'name' = 'Types of Note' and r->>'content' = 'Idea', 'name changes alone keep the content');
   r := lifeos.notebook_update('zz_new_by_update', '{"content":"hello"}');
   perform pg_temp.chk(r->>'key' = 'zz_new_by_update' and r->>'content' = 'hello', 'a missing key is initialised, then updated');
-  perform pg_temp.expect_err($$select lifeos.notebook_update('note_types', '{"bogus":1}')$$, 'unsupported field');
+  perform pg_temp.expect_err($$select lifeos.notebook_update('zz_update_key', '{"bogus":1}')$$, 'unsupported field');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
@@ -163,6 +168,35 @@ begin
   perform pg_temp.chk((r->>'returned_count')::int = 1, 'keyword matches content');
   r := lifeos.notebook_list('{"keyword":"Bravo"}');
   perform pg_temp.chk((r->>'returned_count')::int = 1, 'keyword matches name');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 7. The migration seeds note_types with the five default Note Types ------------
+do $t$
+declare t constant text := 'notebook_note_types_seed_holds_five_default_note_types';
+  r jsonb;
+begin
+  r := lifeos.notebook_read('note_types');
+  perform pg_temp.chk(not (r->>'initialised')::boolean, 'the seeded note_types Notebook already exists');
+  perform pg_temp.chk(r->>'name' = 'Note Types', 'seeded name is Note Types, got ' || (r->>'name'));
+  perform pg_temp.chk(r->>'content' = E'Idea\nFeeling\nExperience\nExplanation\nGeneral', 'seeded content is the five Note Types, got "' || (r->>'content') || '"');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 8. A note_types Notebook created on read starts with the five Note Types -------
+do $t$
+declare t constant text := 'notebook_note_types_created_on_read_starts_with_five_default_note_types';
+  r jsonb;
+begin
+  -- Test setup: remove the seeded row so the read creates the Notebook.
+  delete from lifeos.notebooks where key = 'note_types';
+  r := lifeos.notebook_read('note_types');
+  perform pg_temp.chk((r->>'initialised')::boolean, 'the first read creates note_types');
+  perform pg_temp.chk(r->>'name' = 'Note Types', 'created name is Note Types, got ' || (r->>'name'));
+  perform pg_temp.chk(r->>'content' = E'Idea\nFeeling\nExperience\nExplanation\nGeneral', 'created content is the five Note Types, got "' || (r->>'content') || '"');
+  perform pg_temp.chk(string_to_array(r->>'content', E'\n') = array['Idea','Feeling','Experience','Explanation','General'], 'one Note Type per line, in order');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

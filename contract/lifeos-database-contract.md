@@ -233,9 +233,9 @@ A key matches `^[a-z][a-z0-9_]*$` and is unique. `content` is plain text.
 
 **Behavior:**
 1. When a Notebook with `p_key` exists, the function returns it unchanged.
-2. When none exists, the function creates one Notebook with empty `content` and returns it.
+2. When none exists, the function creates one Notebook with the starting `content` from item 4 and returns it.
 3. The name of a new Notebook is `p_name` when supplied. Otherwise the catalog keys take these names: `subject_types` = "Subject Types", `subject_tags` = "Subject Tags", `expense_tags` = "Expense Tags", `note_types` = "Note Types", `defaults` = "Defaults". Any other key takes the key as its name.
-4. Every new Notebook starts empty, except `defaults`, which starts with the content `currency: MYR`.
+4. A new `note_types` Notebook starts with the content `Idea`, `Feeling`, `Experience`, `Explanation`, `General`, one per line. A new `defaults` Notebook starts with the content `currency: MYR`. Every other new Notebook starts empty.
 
 **Returns:** The complete Notebook, plus `"initialised": boolean`, which is true when this call created it.
 
@@ -854,7 +854,7 @@ A Remark adds a simple detail to a prior Record without a structured update.
 2. The function appends `{ "timestamp": "<current UTC timestamp>", "text": "<trimmed p_text>" }` to `remarks`.
 3. An empty `p_text` returns "invalid input". A deleted Record returns "record deleted".
 4. A Remark on an Expense creates no correction version.
-5. A Remark sets `updated_at`. On a Note it leaves `edited_at` and the Note's date unchanged.
+5. A Remark does not change `updated_at`. On a Note it leaves `edited_at` and the Note's date unchanged.
 
 **Returns:** The complete Record after the Remark is appended.
 
@@ -1218,9 +1218,9 @@ Line validation:
 2. A purchase counts in the period of its `transaction_date`. A Refund counts as its negative total in the period the money came back.
 3. Part 1, `total_spent`: the sum of `expense_total` over purchases and Refunds.
 4. Part 2, `by_payment_method`: the same sum per `payment_method_subject_id`, with the Subject name. Ordered by total descending.
-5. Part 3, `by_category`: the sum of `line_total` per `category` over purchase Lines. Refund Lines are excluded. Adjustment Lines count under their stored Category. Ordered by total descending.
-6. Part 4, `by_tag`: the sum of `line_total` per Tag over purchase Lines. A Line with several Tags counts under each Tag. Refund Lines are excluded. Ordered by total descending.
-7. Part 5, `adjustments`: the signed sum of purchase Lines with `line_type = "adjustment"`, and that sum per Merchant. Ordered with the most negative total first, so the first entry is the source that gave the most.
+5. Part 3, `by_category`: the sum of `line_total` per `category` over purchase Lines. Refund Lines and Adjustment Lines are excluded. Ordered by total descending.
+6. Part 4, `by_tag`: the sum of `line_total` per Tag over purchase Lines. A Line with several Tags counts under each Tag. Refund Lines and Adjustment Lines are excluded. Ordered by total descending.
+7. Part 5, `adjustments`: the signed sum of purchase Lines with `line_type = "adjustment"`, and that sum per Merchant. Ordered with the most negative total first, so the first entry is the source that gave the most. Parts 3 and 4 leave out Adjustment Lines, so their totals may not add up to Part 1, `total_spent`. An Adjustment Line still stores its Category.
 8. The report also returns two Refund lists for the Agent's explanation:
    - `refunds_in_period`: each Refund in the period with its original's `transaction_date` and total.
    - `later_refunds`: each active Refund after `to_date` whose original is in the period.
@@ -1460,7 +1460,7 @@ A Reading has one Reading Remark made of entries. Entry fields: `entry_id` (uuid
 
 **Defaults:** `storyline_id = null`. `timestamp` = current time.
 
-**Behavior:** The function appends one entry with a new `entry_id`. The Reading and its Analyses stay unchanged.
+**Behavior:** The function appends one entry with a new `entry_id`. The Reading's `updated_at` and its Analyses stay unchanged.
 
 **Returns:** The complete Reading with `remark_entries`.
 
@@ -1476,7 +1476,7 @@ A Reading has one Reading Remark made of entries. Entry fields: `entry_id` (uuid
 
 **Defaults:** None.
 
-**Behavior:** The function replaces the supplied fields of that entry. Its `entry_id` and `timestamp` stay.
+**Behavior:** The function replaces the supplied fields of that entry. Its `entry_id` and `timestamp` stay. The Reading's `updated_at` stays unchanged, because the function changes only a Remark entry.
 
 **Returns:** The complete Reading with `remark_entries`.
 
