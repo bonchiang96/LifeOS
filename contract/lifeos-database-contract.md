@@ -483,7 +483,7 @@ Status rules:
 
 **Defaults:** None.
 
-**Behavior:** Follows 1.5 items 8 and 9. A linked Event keeps its stored `schedule_id`. Its returns show `schedule_id = null`. The deleted Schedule keeps its `status` until the Event that stores its ID is deleted. 4.2.6 item 2 then sets its `status` to `planned`. After the Event links to another Schedule (4.2.2 item 3), the Event no longer stores that ID. The deleted Schedule then keeps its `status`.
+**Behavior:** Follows 1.5 items 8 and 9. A linked Event keeps its stored `schedule_id`. Its returns show `schedule_id = null`. The deleted Schedule keeps its `status`. While the linked Event is active, it may link to another Schedule (4.2.2 item 3). When that Event is deleted, 4.2.6 item 2 clears the Event's `schedule_id`, and the deleted Schedule keeps its `status` (4.2.6 item 3).
 
 **Returns:** `{ "id": uuid, "deleted_at": timestamp }`.
 
