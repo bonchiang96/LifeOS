@@ -16,6 +16,8 @@
 --   11. expense_spending_report_order_and_per_currency_totals
 --   12. credit_purchase_is_one_expense_and_repayment_is_not_in_report
 --   13. expense_spending_report_leaves_adjustment_lines_out_of_category_and_tag
+--   14. expense_create_batch_error_ends_with_item_index
+--   15. expense_refund_create_rejects_amount_above_original_and_date_before_original
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -532,6 +534,53 @@ begin
   perform pg_temp.chk(jsonb_array_length(adj->'items') = 1 and adj->'items'->0->>'merchant_name' = 'Adj Shop' and (adj->'items'->0->>'total')::numeric = -10,
     'part 5 lists Adj Shop -10');
   perform pg_temp.chk((myr->'parts'->0->>'total')::numeric = 70, 'part 1 total_spent is unchanged: 70, got ' || (myr->'parts'->0->>'total'));
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 14. Batch: the error ends with the 0-based index of the invalid item (M-0020 C F-1)
+do $t$
+declare t constant text := 'expense_create_batch_error_ends_with_item_index';
+  pm uuid := pg_temp.mk_subject('Card Index', 'payment method'); ok jsonb; no_lines jsonb; bad_field jsonb;
+begin
+  ok := jsonb_build_object('transaction_date','2032-10-01','merchant_name','IndexShopOk','payment_method_subject_id', pm,'expense_total', 5,'currency','MYR',
+         'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',5,'line_total',5,'category','food')));
+  no_lines := ok - 'lines';
+  bad_field := ok || '{"bogus":1}';
+  perform pg_temp.expect_err(format('select lifeos.expense_create_batch(%L::jsonb)', jsonb_build_object('expenses', jsonb_build_array(ok, ok, no_lines))), 'invalid input at item 2');
+  perform pg_temp.expect_err(format('select lifeos.expense_create_batch(%L::jsonb)', jsonb_build_object('expenses', jsonb_build_array(no_lines, ok))), 'invalid input at item 0');
+  perform pg_temp.expect_err(format('select lifeos.expense_create_batch(%L::jsonb)', jsonb_build_object('expenses', jsonb_build_array(ok, bad_field))), 'unsupported field at item 1');
+  perform pg_temp.expect_err(format('select lifeos.expense_create_batch(%L::jsonb)', jsonb_build_object('expenses', jsonb_build_array(ok, ok || '{"refund_of":null}'))), 'unsupported field at item 1');
+  perform pg_temp.chk((lifeos.expense_search('{"keyword":"IndexShopOk"}')->>'returned_count')::int = 0, 'a rejected batch saves nothing');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 15. Refund: at most the original total, never dated before the original (M-0020 S5)
+do $t$
+declare t constant text := 'expense_refund_create_rejects_amount_above_original_and_date_before_original';
+  pm uuid := pg_temp.mk_subject('Card Refund Limit', 'payment method'); o jsonb; r1 jsonb; r2 jsonb; base jsonb;
+begin
+  o := lifeos.expense_create(jsonb_build_object('transaction_date','2032-11-10','merchant_name','LimitShop','payment_method_subject_id', pm,'expense_total', 100,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',100,'line_total',100,'category','clothing'))));
+  base := jsonb_build_object('refund_of', o->>'id','line_type','item');
+  -- amount above the original total
+  perform pg_temp.expect_err(format('select lifeos.expense_refund_create(%L::jsonb)', base || '{"refund_amount":100.01,"transaction_date":"2032-11-12"}'), 'invalid input');
+  -- date before the original transaction date
+  perform pg_temp.expect_err(format('select lifeos.expense_refund_create(%L::jsonb)', base || '{"refund_amount":10,"transaction_date":"2032-11-09"}'), 'invalid input');
+  -- the same date as the original and several Refunds up to the original total are accepted
+  r1 := lifeos.expense_refund_create(base || '{"refund_amount":60,"transaction_date":"2032-11-10"}');
+  perform pg_temp.chk((r1->>'expense_total')::numeric = -60, 'a Refund on the original date is accepted');
+  -- several Refunds may not sum above the original total
+  perform pg_temp.expect_err(format('select lifeos.expense_refund_create(%L::jsonb)', base || '{"refund_amount":40.01,"transaction_date":"2032-11-15"}'), 'invalid input');
+  r2 := lifeos.expense_refund_create(base || '{"refund_amount":40,"transaction_date":"2032-11-15"}');
+  perform pg_temp.chk((r2->>'expense_total')::numeric = -40, 'Refunds that sum to the original total are accepted');
+  perform pg_temp.expect_err(format('select lifeos.expense_refund_create(%L::jsonb)', base || '{"refund_amount":0.01,"transaction_date":"2032-11-16"}'), 'invalid input');
+  -- a deleted Refund no longer counts toward the sum
+  perform lifeos.expense_delete((r2->>'id')::uuid, 'entered twice');
+  r2 := lifeos.expense_refund_create(base || '{"refund_amount":40,"transaction_date":"2032-11-16"}');
+  perform pg_temp.chk((r2->>'expense_total')::numeric = -40, 'a deleted Refund leaves room for a new Refund');
+  perform pg_temp.chk(jsonb_array_length(lifeos.expense_read((o->>'id')::uuid)->'refunds') = 2 and (lifeos.expense_read((o->>'id')::uuid)->>'expense_total')::numeric = 100, 'the original stays unchanged with two active Refunds');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

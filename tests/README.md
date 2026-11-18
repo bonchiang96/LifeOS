@@ -12,12 +12,12 @@ The tests call only functions of the schema `lifeos`. Error tests compare the ex
 |---|---|---|---|
 | `02_memory.sql` | LifeOS Memory | 2 | 5 |
 | `03_notebook.sql` | Notebook | 3 | 8 |
-| `04_personal_records.sql` | Personal Records | 4 | 16 |
-| `05_subject.sql` | Subject | 5 | 7 |
-| `06_financial_records.sql` | Financial Records | 6 | 13 |
-| `07_divination_reflection.sql` | Divination & Reflection | 7 | 12 |
+| `04_personal_records.sql` | Personal Records | 4 | 18 |
+| `05_subject.sql` | Subject | 5 | 8 |
+| `06_financial_records.sql` | Financial Records | 6 | 15 |
+| `07_divination_reflection.sql` | Divination & Reflection | 7 | 14 |
 | `08_communication_assistant.sql` | Communication Assistant | 8 | 12 |
-| `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | 9 | 8 |
+| `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | 9 | 10 |
 
 ## How each file works
 
@@ -46,6 +46,8 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 3. `07_divination_reflection.sql`, test 12, moves `updated_at` of one Reading 5 days back. This shows that a Reading Remark leaves `updated_at` unchanged.
 4. `03_notebook.sql`, test 8, deletes the seeded `note_types` row, so the first read creates it with the five default Note Types.
 5. `02_memory.sql` test 4 and `08_communication_assistant.sql` tests 10 and 11 spread `updated_at` and `finalized_at` to prove the newest-first ordering.
+6. `04_personal_records.sql`, test 17, moves `updated_at` of one Schedule, and `created_at` and `updated_at` of one Note. A transaction has one clock value, so this is the only way to show that a Remark change or removal leaves these dates unchanged.
+7. `07_divination_reflection.sql`, tests 13 and 14, each move `updated_at` of one Reading. A transaction has one clock value, so only this shows that a Reading Remark removal and a Story Person change leave `updated_at` unchanged.
 
 ## Coverage
 
@@ -80,6 +82,8 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Record links ignore deleted targets | `record_links_ignore_deleted_targets` | `04_personal_records.sql` |
 | Remark on a Record, updated_at unchanged | `record_add_remark_rules` | `04_personal_records.sql` |
 | Soft delete, read and search of deleted Records | `soft_delete_read_and_search_deleted` | `04_personal_records.sql` |
+| Change and removal of a Remark, Record dates unchanged | `record_update_remark_and_record_delete_remark_leave_record_dates_unchanged` | `04_personal_records.sql` |
+| No Record link between a Reading and a Storyline | `record_link_create_rejects_reading_storyline_pair` | `04_personal_records.sql` |
 | Subject create and single user Subject | `subject_create_defaults_and_single_user` | `05_subject.sql` |
 | Subject Discovery search | `subject_search_compact_and_exact_first` | `05_subject.sql` |
 | Subject Alias and existence check | `subject_alias_and_check` | `05_subject.sql` |
@@ -87,6 +91,7 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Merge of the user Subject and duplicate links | `subject_merge_user_flag_and_duplicate_links` | `05_subject.sql` |
 | Merge rejections | `subject_merge_rejections` | `05_subject.sql` |
 | Subject update, read and delete | `subject_update_read_and_delete` | `05_subject.sql` |
+| Merge needs a combined identity | `subject_merge_rejects_empty_identity` | `05_subject.sql` |
 | Expense with Lines and Adjustments | `expense_create_with_lines_and_adjustments` | `06_financial_records.sql` |
 | Discrepancies as comparison flags | `expense_create_discrepancies_are_flags_only` | `06_financial_records.sql` |
 | Rejection of an Expense without Lines | `expense_without_lines_and_other_invalid_input_rejected` | `06_financial_records.sql` |
@@ -100,6 +105,8 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Spending report order and per-currency totals | `expense_spending_report_order_and_per_currency_totals` | `06_financial_records.sql` |
 | Adjustment Lines stay out of by_category and by_tag | `expense_spending_report_leaves_adjustment_lines_out_of_category_and_tag` | `06_financial_records.sql` |
 | Credit purchase and repayment | `credit_purchase_is_one_expense_and_repayment_is_not_in_report` | `06_financial_records.sql` |
+| Batch rejection names the invalid item | `expense_create_batch_error_ends_with_item_index` | `06_financial_records.sql` |
+| Refund within the original amount and date | `expense_refund_create_rejects_amount_above_original_and_date_before_original` | `06_financial_records.sql` |
 | Divination save with Readings and Analyses | `divination_save_readings_and_analyses` | `07_divination_reflection.sql` |
 | Divination save validation | `divination_save_rejects_invalid_input` | `07_divination_reflection.sql` |
 | Divination search, short view | `divination_search_short_view` | `07_divination_reflection.sql` |
@@ -112,6 +119,8 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Story Person | `story_person_create_search_read_delete` | `07_divination_reflection.sql` |
 | Storyline search by Story Persons | `storyline_search_by_story_persons` | `07_divination_reflection.sql` |
 | Storyline update, delete and links | `storyline_update_delete_and_links` | `07_divination_reflection.sql` |
+| Reading Remark entry removal, updated_at and Analyses unchanged | `reading_remark_delete_keeps_reading_updated_at_and_analyses` | `07_divination_reflection.sql` |
+| Story Person change on a saved Reading is not an edit | `reading_story_persons_set_leaves_reading_updated_at_unchanged` | `07_divination_reflection.sql` |
 | Communication Profiles | `profile_create_person_group_audience_rules` | `08_communication_assistant.sql` |
 | Profile search, update and Person Subject link | `profile_search_update_and_person_link` | `08_communication_assistant.sql` |
 | Audience inheritance | `membership_set_remove_and_rejections` | `08_communication_assistant.sql` |
@@ -132,3 +141,5 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Timeline period input | `timeline_requires_a_period` | `09_timeline_shared_retrieval.sql` |
 | Subject questions across Modules | `subject_records_cross_module_retrieval` | `09_timeline_shared_retrieval.sql` |
 | Subject records filters, order and paging | `subject_records_filters_order_paging_and_deleted` | `09_timeline_shared_retrieval.sql` |
+| Subject questions about a deleted Subject | `subject_records_on_deleted_subject_returns_record_not_found` | `09_timeline_shared_retrieval.sql` |
+| Each Subject once in Reading links and Timeline subjects | `reading_links_and_timeline_subjects_list_each_subject_once` | `09_timeline_shared_retrieval.sql` |

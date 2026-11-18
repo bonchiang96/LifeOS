@@ -20,14 +20,15 @@ An AI Agent reads this file before it writes or changes a migration in `supabase
 
 9. `story_person_ids` on Readings and Storylines are stored in join tables.
 10. A check constraint on Expense Line `category` uses the 17 Categories.
+11. Every stored Remark in a `remarks` array carries a `remark_id` from `gen_random_uuid()`. Every function that stores a Remark assigns it, including create input and `record_add_remark`. Input never supplies it. A migration gives each existing Remark a `remark_id`.
 
 ## 4. Seed data
 
-11. The migrations create two Notebooks. The `defaults` Notebook holds the content `currency: MYR`. The `note_types` Notebook holds `Idea`, `Feeling`, `Experience`, `Explanation` and `General`, one per line.
+12. The migrations create two Notebooks. The `defaults` Notebook holds the content `currency: MYR`. The `note_types` Notebook holds `Idea`, `Feeling`, `Experience`, `Explanation` and `General`, one per line.
 
 ## 5. Migration order
 
-12. Files in `supabase/migrations/` run in name order, one file at a time.
-13. A fix to an applied build is a new migration file. It uses `create or replace function` with the same signature.
-14. The tests in `tests/` run after all migrations. Each test file ends with a rollback and leaves no data.
-15. A migration that creates a new function revokes `EXECUTE` on it from `PUBLIC`, `anon` and `authenticated`. It then grants `EXECUTE` to `anon` and `authenticated` only when the function is a Contract function. `create or replace function` on an existing function keeps its grants.
+13. Files in `supabase/migrations/` run in name order, one file at a time.
+14. A fix to an applied build is a new migration file. It uses `create or replace function` with the same signature.
+15. The tests in `tests/` run after all migrations. Each test file ends with a rollback and leaves no data.
+16. A migration that creates a new function revokes `EXECUTE` on it from `PUBLIC`, `anon` and `authenticated`. It then grants `EXECUTE` to `anon` and `authenticated` only when the function is a Contract function. `create or replace function` on an existing function keeps its grants.

@@ -19,12 +19,16 @@
 --   14. record_links_ignore_deleted_targets
 --   15. record_add_remark_rules
 --   16. soft_delete_read_and_search_deleted
+--   17. record_update_remark_and_record_delete_remark_leave_record_dates_unchanged
+--   18. record_link_create_rejects_reading_storyline_pair
 --
 -- Test setup that the Contract has no function for: test 13 moves created_at of
 -- one Note into the past, so the Note date can be told apart from today inside a
 -- single transaction. Test 15 moves updated_at of one Schedule 5 days back, so a
--- change of updated_at shows inside one transaction. Every other step calls Contract
--- functions only.
+-- change of updated_at shows inside one transaction. Test 17 moves updated_at of one
+-- Schedule and created_at and updated_at of one Note back in the same way. Test 17
+-- also reads the five Record tables to check that every stored Remark has a remark_id.
+-- Every other step calls Contract functions only.
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
 begin;
@@ -587,6 +591,108 @@ begin
   perform lifeos.note_delete((n->>'id')::uuid);
   perform pg_temp.chk((lifeos.note_search('{"keyword":"doomed note xq"}')->>'returned_count')::int = 0, 'search hides a deleted Note');
   perform pg_temp.expect_err(format($$select lifeos.note_update(%L::uuid, '{"content":"x"}')$$, n->>'id'), 'record deleted');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 17. Remark change and delete: remark_id, unchanged dates, no Expense version (M-0020 F1, D2)
+do $t$
+declare t constant text := 'record_update_remark_and_record_delete_remark_leave_record_dates_unchanged';
+  td date := pg_temp.today(); s jsonb; r jsonb; e jsonb; n jsonb; x jsonb; sid uuid; nid uuid; xid uuid;
+  rid1 text; rid2 text; ts1 text; before_updated timestamptz; pm uuid; missing int;
+begin
+  -- record_add_remark and create-time Remarks carry a remark_id
+  s := lifeos.schedule_create('{"title":"Visit gallery","planned_date":"2032-04-01","remarks":["bring water"]}');
+  sid := (s->>'id')::uuid;
+  perform pg_temp.chk((s->'remarks'->0->>'remark_id')::uuid is not null, 'a create-time Remark has a remark_id');
+  r := lifeos.record_add_remark('schedule', sid, 'bring the camera');
+  rid1 := r->'remarks'->0->>'remark_id';
+  rid2 := r->'remarks'->1->>'remark_id';
+  ts1 := r->'remarks'->0->>'timestamp';
+  perform pg_temp.chk(rid2::uuid is not null and rid1 <> rid2, 'record_add_remark appends a Remark with a new remark_id');
+
+  -- Test setup: move updated_at 5 days back (one transaction has one clock value).
+  update lifeos.schedules set updated_at = updated_at - interval '5 days' where id = sid;
+  select updated_at into before_updated from lifeos.schedules where id = sid;
+
+  r := lifeos.record_update_remark('schedule', sid, rid1::uuid, '  bring two bottles of water ');
+  perform pg_temp.chk(r->'remarks'->0->>'text' = 'bring two bottles of water', 'record_update_remark replaces the trimmed text');
+  perform pg_temp.chk(r->'remarks'->0->>'remark_id' = rid1 and r->'remarks'->0->>'timestamp' = ts1, 'remark_id and timestamp stay');
+  perform pg_temp.chk(r->'remarks'->1->>'text' = 'bring the camera', 'the other Remark stays');
+  perform pg_temp.chk(r->>'title' = 'Visit gallery' and r ? 'linked_event_id', 'record_update_remark returns the complete Record');
+  perform pg_temp.chk((select updated_at from lifeos.schedules where id = sid) = before_updated, 'record_update_remark leaves updated_at unchanged');
+  r := lifeos.record_delete_remark('schedule', sid, rid1::uuid);
+  perform pg_temp.chk(jsonb_array_length(r->'remarks') = 1 and r->'remarks'->0->>'remark_id' = rid2, 'record_delete_remark removes only that Remark');
+  perform pg_temp.chk(r->>'title' = 'Visit gallery', 'record_delete_remark returns the complete Record');
+  perform pg_temp.chk((select updated_at from lifeos.schedules where id = sid) = before_updated, 'record_delete_remark leaves updated_at unchanged');
+
+  -- Note: edited_at, Note date and updated_at stay
+  n := lifeos.note_create('{"note_type":"General","content":"Gallery thoughts"}');
+  nid := (n->>'id')::uuid;
+  -- Test setup: move created_at and updated_at 10 days back.
+  update lifeos.notes set created_at = created_at - interval '10 days', updated_at = updated_at - interval '10 days' where id = nid;
+  select updated_at into before_updated from lifeos.notes where id = nid;
+  r := lifeos.record_add_remark('note', nid, 'first remark');
+  r := lifeos.record_update_remark('note', nid, (r->'remarks'->0->>'remark_id')::uuid, 'changed remark');
+  perform pg_temp.chk(r->'remarks'->0->>'text' = 'changed remark', 'the Note Remark is changed');
+  perform pg_temp.chk(r->>'edited_at' is null and r->>'note_date' = (td - 10)::text, 'a Remark change leaves edited_at and the Note date unchanged');
+  perform pg_temp.chk((r->>'updated_at')::timestamptz = before_updated, 'a Remark change leaves the Note updated_at unchanged');
+  r := lifeos.record_delete_remark('note', nid, (r->'remarks'->0->>'remark_id')::uuid);
+  perform pg_temp.chk(r->'remarks' = '[]'::jsonb, 'the Note Remark is deleted');
+  perform pg_temp.chk(r->>'edited_at' is null and r->>'note_date' = (td - 10)::text and (r->>'updated_at')::timestamptz = before_updated,
+    'a Remark delete leaves edited_at, the Note date and updated_at unchanged');
+
+  -- Expense: no correction version
+  pm := ((lifeos.subject_create('{"name":"Card remark test","subject_type":"payment method"}'))->>'id')::uuid;
+  x := lifeos.expense_create(jsonb_build_object('transaction_date','2032-04-02','payment_method_subject_id', pm,'expense_total', 12,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',12,'line_total',12,'category','food'))));
+  xid := (x->>'id')::uuid;
+  r := lifeos.record_add_remark('expense', xid, 'shared with a friend');
+  r := lifeos.record_update_remark('expense', xid, (r->'remarks'->0->>'remark_id')::uuid, 'shared with two friends');
+  perform pg_temp.chk(r->'remarks'->0->>'text' = 'shared with two friends' and (r->>'version')::int = 1, 'a Remark change on an Expense creates no correction version');
+  r := lifeos.record_delete_remark('expense', xid, (r->'remarks'->0->>'remark_id')::uuid);
+  perform pg_temp.chk(r->'remarks' = '[]'::jsonb and (r->>'version')::int = 1, 'a Remark delete on an Expense creates no correction version');
+  perform pg_temp.chk((select count(*) from lifeos.expense_versions h where h.expense_id = xid) = 0, 'the Expense has no history version');
+
+  -- errors
+  perform pg_temp.expect_err(format($$select lifeos.record_update_remark('schedule', %L::uuid, %L::uuid, '  ')$$, sid, rid2), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.record_update_remark('subject', %L::uuid, %L::uuid, 'x')$$, sid, rid2), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.record_delete_remark('reading', %L::uuid, %L::uuid)$$, sid, rid2), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.record_update_remark('schedule', %L::uuid, gen_random_uuid(), 'x')$$, sid), 'record not found');
+  perform pg_temp.expect_err(format($$select lifeos.record_delete_remark('schedule', %L::uuid, gen_random_uuid())$$, sid), 'record not found');
+  perform pg_temp.expect_err(format($$select lifeos.record_delete_remark('schedule', %L::uuid, %L::uuid)$$, sid, rid1), 'record not found');
+  perform pg_temp.expect_err(format($$select lifeos.record_update_remark('schedule', gen_random_uuid(), %L::uuid, 'x')$$, rid2), 'record not found');
+  perform lifeos.schedule_delete(sid);
+  perform pg_temp.expect_err(format($$select lifeos.record_update_remark('schedule', %L::uuid, %L::uuid, 'x')$$, sid, rid2), 'record deleted');
+  perform pg_temp.expect_err(format($$select lifeos.record_delete_remark('schedule', %L::uuid, %L::uuid)$$, sid, rid2), 'record deleted');
+
+  -- backfill: every stored Remark of the five Record tables has a remark_id
+  select count(*) into missing from (
+    select remarks from lifeos.schedules union all select remarks from lifeos.events
+    union all select remarks from lifeos.observations union all select remarks from lifeos.notes
+    union all select remarks from lifeos.expenses) a
+  cross join lateral jsonb_array_elements(a.remarks) e(v)
+  where not (e.v ? 'remark_id');
+  perform pg_temp.chk(missing = 0, 'every stored Remark has a remark_id, missing ' || missing);
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 18. Record links: a Reading and a Storyline cannot be linked (M-0020 F2) ---------
+do $t$
+declare t constant text := 'record_link_create_rejects_reading_storyline_pair';
+  d jsonb; rid text; sl jsonb; ev jsonb;
+begin
+  d := lifeos.divination_record_save('{"readings":[{"question":"Link Q","method":"tarot","result_text":"Link R"}]}');
+  rid := d->'readings'->0->>'id';
+  sl := lifeos.storyline_create('{"content":"Link test storyline"}');
+  perform pg_temp.expect_err(format($$select lifeos.record_link_create(jsonb_build_object('from_type','reading','from_id', %L::uuid,'to_type','storyline','to_id', %L::uuid))$$, rid, sl->>'id'), 'invalid relationship');
+  perform pg_temp.expect_err(format($$select lifeos.record_link_create(jsonb_build_object('from_type','storyline','from_id', %L::uuid,'to_type','reading','to_id', %L::uuid))$$, sl->>'id', rid), 'invalid relationship');
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(lifeos.record_links_read('reading', rid::uuid)->'links') l where l->>'record_type' = 'storyline'), 'the Reading has no Storyline link');
+  -- a Reading and a Storyline still link to other Records
+  ev := lifeos.event_create('{"title":"Link test event","occurred_date":"2032-04-03"}');
+  perform pg_temp.chk(lifeos.record_link_create(jsonb_build_object('from_type','reading','from_id', rid,'to_type','event','to_id', ev->>'id'))->>'link_id' is not null, 'a Reading links to an Event');
+  perform pg_temp.chk(lifeos.record_link_create(jsonb_build_object('from_type','storyline','from_id', sl->>'id','to_type','event','to_id', ev->>'id'))->>'link_id' is not null, 'a Storyline links to an Event');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

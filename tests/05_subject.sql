@@ -10,6 +10,7 @@
 --   5. subject_merge_user_flag_and_duplicate_links
 --   6. subject_merge_rejections
 --   7. subject_update_read_and_delete
+--   8. subject_merge_rejects_empty_identity
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -261,6 +262,20 @@ begin
   perform pg_temp.chk((lifeos.subject_search('{"keyword":"Surgeryxq"}')->>'returned_count')::int = 0, 'search hides the deleted Subject');
   perform pg_temp.chk((lifeos.subject_search('{"keyword":"Surgeryxq","include_deleted":true}')->>'returned_count')::int = 1, 'include_deleted shows it');
   perform pg_temp.expect_err(format($$select lifeos.subject_update(%L::uuid, '{"name":"x"}')$$, s->>'id'), 'record deleted');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 8. Merge: an empty identity is rejected and changes nothing (M-0020 S2) -----------
+do $t$
+declare t constant text := 'subject_merge_rejects_empty_identity';
+  a jsonb; b jsonb;
+begin
+  a := lifeos.subject_create('{"name":"Empty identity keep","subject_type":"person"}');
+  b := lifeos.subject_create('{"name":"Empty identity merge","subject_type":"person"}');
+  perform pg_temp.expect_err(format($$select lifeos.subject_merge(jsonb_build_object('keep_id', %L::uuid, 'merge_id', %L::uuid, 'identity', '{}'::jsonb))$$, a->>'id', b->>'id'), 'invalid input');
+  perform pg_temp.chk(lifeos.subject_read((a->>'id')::uuid)->>'name' = 'Empty identity keep', 'the kept Subject is unchanged');
+  perform pg_temp.chk(lifeos.subject_read((b->>'id')::uuid)->>'deleted_at' is null, 'the other Subject stays active');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

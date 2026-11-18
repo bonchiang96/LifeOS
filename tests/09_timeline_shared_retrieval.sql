@@ -11,6 +11,8 @@
 --   6. timeline_requires_a_period
 --   7. subject_records_cross_module_retrieval
 --   8. subject_records_filters_order_paging_and_deleted
+--   9. subject_records_on_deleted_subject_returns_record_not_found
+--   10. reading_links_and_timeline_subjects_list_each_subject_once
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -340,6 +342,54 @@ begin
   perform lifeos.record_link_create(jsonb_build_object('from_type','note','from_id', nt->>'id','to_type','subject','to_id', s));
   r := lifeos.subject_records(s, jsonb_build_object('from_date', pg_temp.today(), 'to_date', pg_temp.today()));
   perform pg_temp.chk((r->>'returned_count')::int = 1 and r->'results'->0->>'id' = nt->>'id' and r->'results'->0->>'occurrence_date' = pg_temp.today()::text, 'a Note is dated by its note_date');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 9. subject_records: a deleted or merged Subject returns "record not found" (M-0020 S1) -----------------
+do $t$
+declare t constant text := 'subject_records_on_deleted_subject_returns_record_not_found';
+  s uuid := pg_temp.mk_subject('Sr3 deleted','person'); k uuid := pg_temp.mk_subject('Sr3 keep','person'); m uuid := pg_temp.mk_subject('Sr3 merged','person'); e jsonb;
+begin
+  e := lifeos.event_create('{"title":"Sr3 event","occurred_date":"2036-06-01"}');
+  perform lifeos.record_link_create(jsonb_build_object('from_type','event','from_id', e->>'id','to_type','subject','to_id', s));
+  perform pg_temp.chk((lifeos.subject_records(s, '{}')->>'returned_count')::int = 1, 'an active Subject returns its Records');
+  perform lifeos.subject_delete(s);
+  perform pg_temp.expect_err(format($$select lifeos.subject_records(%L::uuid, '{}')$$, s), 'record not found');
+  perform lifeos.subject_merge(jsonb_build_object('keep_id', k, 'merge_id', m, 'identity', '{"name":"Sr3 keep"}'::jsonb));
+  perform pg_temp.expect_err(format($$select lifeos.subject_records(%L::uuid, '{}')$$, m), 'record not found');
+  perform pg_temp.expect_err($$select lifeos.subject_records(gen_random_uuid(), '{}')$$, 'record not found');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 10. A Reading lists a Subject once when a Record link and a Story Person lead to it (M-0020 S6) ------
+do $t$
+declare t constant text := 'reading_links_and_timeline_subjects_list_each_subject_once';
+  s uuid := pg_temp.mk_subject('S6 person','person'); o uuid := pg_temp.mk_subject('S6 other','person'); sp uuid; sp2 uuid; d jsonb; rid text; rl jsonb; tl jsonb; i jsonb;
+begin
+  sp := ((lifeos.story_person_create(jsonb_build_object('name','S6 story person','subject_id', s)))->>'id')::uuid;
+  sp2 := ((lifeos.story_person_create(jsonb_build_object('name','S6 second story person','subject_id', o)))->>'id')::uuid;
+  d := lifeos.divination_record_save(jsonb_build_object('readings', jsonb_build_array(jsonb_build_object('question','S6 Q','method','tarot','result_text','R',
+         'reading_date','2036-07-01','story_person_ids', jsonb_build_array(sp, sp2)))));
+  rid := d->'readings'->0->>'id';
+  perform lifeos.record_link_create(jsonb_build_object('from_type','reading','from_id', rid,'to_type','subject','to_id', s));
+
+  rl := lifeos.record_links_read('reading', rid::uuid);
+  perform pg_temp.chk((select count(*) from jsonb_array_elements(rl->'links') l where l->>'id' = s::text) = 1, 'the Reading links list the Subject once');
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(rl->'links') l where l->>'id' = s::text and l->>'via' = 'record_link'), 'the Record link is the listed path');
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(rl->'links') l where l->>'id' = o::text and l->>'via' = 'story_person_subject'), 'a Subject reached only through a Story Person stays listed');
+
+  tl := lifeos.timeline('{"from_date":"2036-07-01","to_date":"2036-07-01"}');
+  i := pg_temp.item(tl, rid);
+  perform pg_temp.chk((select count(*) from jsonb_array_elements(i->'subjects') x where x->>'id' = s::text) = 1, 'the Timeline item lists the Subject once');
+  perform pg_temp.chk((select count(*) from jsonb_array_elements(i->'links') x where x->>'id' = s::text) = 1, 'the Timeline item links list the Subject once');
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(i->'subjects') x where x->>'id' = o::text), 'the Timeline item keeps the other Story Person Subject');
+
+  -- after the Record link is removed, the Story Person path lists the Subject
+  perform lifeos.record_link_delete(jsonb_build_object('from_type','reading','from_id', rid,'to_type','subject','to_id', s));
+  rl := lifeos.record_links_read('reading', rid::uuid);
+  perform pg_temp.chk((select count(*) from jsonb_array_elements(rl->'links') l where l->>'id' = s::text and l->>'via' = 'story_person_subject') = 1, 'the Story Person path lists the Subject without the Record link');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
