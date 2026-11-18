@@ -97,9 +97,10 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
 
 13. **Errors.** Database constraints may return native PostgreSQL errors. Function validation returns errors such as "record not found", "record deleted", "invalid input", "invalid date", "unsupported field" and "invalid relationship".
 
-14. **Referenced Records.** A supplied reference ID, such as a Subject, Story Person, Schedule, Event or Profile ID, names an active Record.
+14. **Referenced Records.** A supplied reference ID, such as a Subject, Story Person, Schedule, Event or Profile ID, names an active Record. A function may state another rule, such as 9.2 item 4.
     - An unknown ID returns "record not found".
     - An ID of a deleted Record returns "record deleted".
+    - An ID in `p_filter` only narrows the results. An unknown or deleted ID in `p_filter` returns no error.
 
 ## 1.6 Access
 
@@ -475,7 +476,7 @@ Status rules:
 
 **Defaults:** None.
 
-**Behavior:** Follows 1.5 items 8 and 9. A linked Event keeps its stored `schedule_id`. Its returns show `schedule_id = null`. The deleted Schedule keeps its `status`, also when the Event later links to another Schedule (4.2.2 item 3).
+**Behavior:** Follows 1.5 items 8 and 9. A linked Event keeps its stored `schedule_id`. Its returns show `schedule_id = null`. The deleted Schedule keeps its `status` until the Event that stores its ID is deleted. 4.2.6 item 2 then sets its `status` to `planned`. After the Event links to another Schedule (4.2.2 item 3), the Event no longer stores that ID. The deleted Schedule then keeps its `status`.
 
 **Returns:** `{ "id": uuid, "deleted_at": timestamp }`.
 
@@ -1248,7 +1249,7 @@ Line validation:
 **Defaults:** None. `p_text` is the required deletion reason.
 
 **Behavior:**
-1. An empty `p_text` returns "invalid input". The function saves a snapshot as a history version with `correction_reason = p_text`.
+1. An empty `p_text` returns "invalid input". Before the deletion, the function saves a snapshot of the current Expense and its Lines as one history version. `p_text` is stored as the `correction_reason` of the version that the deletion produces (6.6).
 2. It then follows 1.5 items 8 and 9. Deleting an already deleted Expense saves no history version. It returns the existing `deleted_at`.
 3. Refunds of a deleted original stay. Their `refund_of` is returned as `null`. Each Refund counts by its own amount and date (6.9 item 2). Its corrections have no limit from the deleted original (6.5 item 11).
 
@@ -1269,7 +1270,7 @@ Line validation:
 **Behavior:**
 1. The original is an active purchase Expense. An original that is a Refund returns "invalid relationship". A deleted original returns "record deleted".
 2. `refund_amount` is positive. It is the actual refunded amount, so a partial Refund uses its partial amount.
-3. `refund_amount` is at most the original `expense_total` minus the totals of the active Refunds already recorded for that original. A larger amount returns "invalid input".
+3. `refund_amount` plus the amounts of the active Refunds already recorded for that original is at most the original `expense_total`. A larger sum returns "invalid input".
 4. `transaction_date` is on or after the original's `transaction_date`. An earlier date returns "invalid input".
 5. The function creates a new Expense with:
    - `expense_type = "refund"` and `refund_of` = the original ID;
