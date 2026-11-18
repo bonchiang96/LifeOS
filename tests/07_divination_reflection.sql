@@ -17,8 +17,9 @@
 --   12. reading_remark_add_and_update_leave_reading_updated_at_unchanged
 --   13. reading_remark_delete_keeps_reading_updated_at_and_analyses
 --   14. reading_story_persons_set_leaves_reading_updated_at_unchanged
+--   15. reading_remark_update_replaces_whole_entry
 --
--- Test setup that the Contract has no function for: tests 12, 13 and 14 each move updated_at
+-- Test setup that the Contract has no function for: tests 12, 13, 14 and 15 each move updated_at
 -- of one Reading 5 days back, so a change of updated_at shows inside one transaction.
 --
 -- Single transaction: begin; tests; select results; rollback.
@@ -250,8 +251,8 @@ begin
   u := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', e2->>'entry_id', 'text', 'A corrected thought'));
   perform pg_temp.chk(u->'remark_entries'->1->>'text' = 'A corrected thought' and u->'remark_entries'->1->>'entry_id' = e2->>'entry_id' and u->'remark_entries'->1->>'timestamp' = e2->>'timestamp', 'the correction keeps entry_id and timestamp');
   perform pg_temp.chk(u->'remark_entries'->0->>'text' = 'It matched what happened', 'other entries stay');
-  u := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', e2->>'entry_id', 'storyline_id', sl->>'id'));
-  perform pg_temp.chk(u->'remark_entries'->1->>'storyline_id' = sl->>'id' and u->'remark_entries'->1->>'text' = 'A corrected thought', 'storyline_id changed alone, text kept');
+  u := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', e2->>'entry_id', 'text', 'A corrected thought', 'storyline_id', sl->>'id'));
+  perform pg_temp.chk(u->'remark_entries'->1->>'storyline_id' = sl->>'id' and u->'remark_entries'->1->>'text' = 'A corrected thought', 'the whole entry is replaced with the supplied text and storyline_id');
   -- the Reading Analyses stay
   perform pg_temp.chk(lifeos.divination_record_read((d->>'id')::uuid)->'readings'->0->'analyses'->0->>'key_reasoning' = 'K', 'Analyses stay unchanged');
   -- storyline_id is an explanatory text reference: deleting the Storyline keeps the entry's reference
@@ -490,6 +491,56 @@ begin
   perform pg_temp.chk(r->'story_person_ids' = jsonb_build_array(sp), 'the Story Person set is replaced');
   perform pg_temp.chk((select updated_at from lifeos.readings where id = rid) = before_updated and (r->>'updated_at')::timestamptz = before_updated, 'reading_story_persons_set leaves updated_at unchanged');
   perform pg_temp.chk(r->>'question' = 'Q14' and r->>'result_text' = 'R14', 'the Question and Result stay');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 15. Reading Remark change replaces the whole entry (J-0018 F1, KB 6.9, M-0020 D2) -------------
+do $t$
+declare t constant text := 'reading_remark_update_replaces_whole_entry';
+  d jsonb; rid uuid; sl jsonb; an jsonb; r jsonb; e1 jsonb; e2 jsonb; u jsonb; before_updated timestamptz;
+begin
+  d := lifeos.divination_record_save('{"readings":[{"question":"Q15","method":"tarot","result_text":"R15"}]}');
+  rid := (d->'readings'->0->>'id')::uuid;
+  an := lifeos.analysis_add(jsonb_build_object('reading_id', rid,'source','Claude','overall_outcome','Go','key_reasoning','Signs'));
+  sl := lifeos.storyline_create('{"content":"The F1 storyline"}');
+  r := lifeos.reading_remark_add(rid, jsonb_build_object('text', 'first entry', 'storyline_id', sl->>'id'));
+  r := lifeos.reading_remark_add(rid, '{"text":"second entry"}');
+  e1 := r->'remark_entries'->0;
+  e2 := r->'remark_entries'->1;
+  -- Test setup: move updated_at 5 days back (one transaction has one clock value).
+  update lifeos.readings set updated_at = updated_at - interval '5 days' where id = rid;
+  select updated_at into before_updated from lifeos.readings where id = rid;
+
+  -- text alone: the trimmed text replaces the entry, and the omitted storyline_id becomes null
+  u := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', e1->>'entry_id', 'text', '  replaced entry  '));
+  perform pg_temp.chk(u->'remark_entries'->0->>'text' = 'replaced entry', 'the entry text is the trimmed text');
+  perform pg_temp.chk(u->'remark_entries'->0 ? 'storyline_id' and u->'remark_entries'->0->>'storyline_id' is null, 'an omitted storyline_id becomes null');
+  perform pg_temp.chk(u->'remark_entries'->0->>'entry_id' = e1->>'entry_id' and u->'remark_entries'->0->>'timestamp' = e1->>'timestamp', 'entry_id and timestamp stay');
+  perform pg_temp.chk(u->'remark_entries'->1 = e2, 'the other entry stays unchanged');
+  -- text and storyline_id: both replace the entry content
+  u := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', e2->>'entry_id', 'text', 'second replaced', 'storyline_id', sl->>'id'));
+  perform pg_temp.chk(u->'remark_entries'->1->>'text' = 'second replaced' and u->'remark_entries'->1->>'storyline_id' = sl->>'id', 'the supplied storyline_id is stored');
+  -- a supplied null storyline_id becomes null
+  u := lifeos.reading_remark_update(rid, jsonb_build_object('entry_id', e2->>'entry_id', 'text', 'second again', 'storyline_id', null));
+  perform pg_temp.chk(u->'remark_entries'->1->>'storyline_id' is null and u->'remark_entries'->1->>'text' = 'second again', 'a null storyline_id is stored as null');
+  perform pg_temp.chk(jsonb_array_length(u->'remark_entries') = 2, 'the entry count stays');
+  -- the Reading's updated_at and its Analyses stay
+  perform pg_temp.chk((select updated_at from lifeos.readings where id = rid) = before_updated and (u->>'updated_at')::timestamptz = before_updated, 'reading_remark_update leaves updated_at unchanged');
+  perform pg_temp.chk(jsonb_array_length(u->'analyses') = 1 and u->'analyses'->0->>'id' = an->>'id' and u->'analyses'->0->>'key_reasoning' = 'Signs', 'the Analyses stay');
+
+  -- text is required and non-empty
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', %L::uuid, 'storyline_id', %L::uuid))$$, rid, e1->>'entry_id', sl->>'id'), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', %L::uuid, 'text', '   '))$$, rid, e1->>'entry_id'), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', %L::uuid, 'text', null))$$, rid, e1->>'entry_id'), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('text', 'no entry'))$$, rid), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', %L::uuid, 'text', 'x', 'bogus', 1))$$, rid, e1->>'entry_id'), 'unsupported field');
+  perform pg_temp.chk((select remark_entries->0->>'text' from lifeos.readings where id = rid) = 'replaced entry', 'a rejected change leaves the entry unchanged');
+  -- unknown entry and unknown or deleted Reading
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', gen_random_uuid(), 'text', 'x'))$$, rid), 'record not found');
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(gen_random_uuid(), jsonb_build_object('entry_id', %L::uuid, 'text', 'x'))$$, e1->>'entry_id'), 'record not found');
+  perform lifeos.reading_delete(rid);
+  perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', %L::uuid, 'text', 'x'))$$, rid, e1->>'entry_id'), 'record deleted');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

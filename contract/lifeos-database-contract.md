@@ -48,7 +48,7 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
 
 ## 1.5 Common Interface Semantics
 
-1. **Record fields.** Every stored Record has `id`, `created_at`, `updated_at` and `deleted_at`. Each Chapter lists the further fields of its Record Types. A function that "returns the complete Record" returns all listed fields plus the derived fields named for that Record Type.
+1. **Record fields.** Every stored Record has `id`, `created_at`, `updated_at` and `deleted_at`. Each Chapter lists the further fields of its Record Types. A function that "returns the complete Record" returns all listed fields plus the derived fields named for that Record Type. Subject derived fields are returned only where Chapter 5 names them.
 
 2. **Record Type names.** Shared functions use these names: `schedule`, `event`, `observation`, `note`, `expense`, `subject`, `divination_record`, `reading`, `storyline`.
 
@@ -64,6 +64,7 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
    - A missing required field returns "invalid input".
    - A required field with the value `null` returns "invalid input". So does a required text field that is empty or holds only spaces.
    - A field outside the supported list returns "unsupported field". This includes an unknown `p_filter` key.
+   - Every function that supports `keyword` also accepts its alias `query` (item 4).
 
 6. **Update.** `p_changes` is partial.
    - An omitted field stays unchanged.
@@ -95,6 +96,10 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
 12. **Transactions.** Each function call runs in one transaction. A batch either saves fully or saves nothing.
 
 13. **Errors.** Database constraints may return native PostgreSQL errors. Function validation returns errors such as "record not found", "record deleted", "invalid input", "invalid date", "unsupported field" and "invalid relationship".
+
+14. **Referenced Records.** A supplied reference ID, such as a Subject, Story Person, Schedule, Event or Profile ID, names an active Record.
+    - An unknown ID returns "record not found".
+    - An ID of a deleted Record returns "record deleted".
 
 ## 1.6 Access
 
@@ -307,7 +312,7 @@ Derived field on every Schedule return: `linked_event_id`, the ID of its active 
 Status rules:
 1. `planned` is the default.
 2. `occurred` is set only by a confirmed Event link (4.2.1, 4.2.2).
-3. `missed` and `cancelled` are set by `schedule_update` or `schedule_stop_series`.
+3. `missed` and `cancelled` are set by `schedule_update` or `schedule_stop_series`. `schedule_update` also sets `planned` again on a Schedule without an active linked Event, such as when the user corrects its Status.
 4. A Schedule with an active linked Event keeps `occurred`. Its status cannot change while the link exists.
 5. A Schedule has at most one active linked Event.
 
@@ -470,7 +475,7 @@ Status rules:
 
 **Defaults:** None.
 
-**Behavior:** Follows 1.5 items 8 and 9. A linked Event keeps its stored `schedule_id`. Its returns show `schedule_id = null`.
+**Behavior:** Follows 1.5 items 8 and 9. A linked Event keeps its stored `schedule_id`. Its returns show `schedule_id = null`. The deleted Schedule keeps its `status`, also when the Event later links to another Schedule (4.2.2 item 3).
 
 **Returns:** `{ "id": uuid, "deleted_at": timestamp }`.
 
@@ -890,7 +895,7 @@ A Remark adds a simple detail to a prior Record without a structured update. Add
 **Defaults:** None.
 
 **Behavior:**
-1. `p_record_type` is `schedule`, `event`, `observation`, `note` or `expense`.
+1. `p_record_type` is `schedule`, `event`, `observation`, `note` or `expense`. Any other value returns "invalid input".
 2. The function replaces the `text` of the Remark with `p_remark_id` by the trimmed `p_text`. Its `remark_id` and `timestamp` stay.
 3. An empty `p_text` returns "invalid input". A deleted Record returns "record deleted". An unknown `p_remark_id` returns "record not found".
 4. A Remark change on an Expense creates no correction version.
@@ -907,7 +912,7 @@ A Remark adds a simple detail to a prior Record without a structured update. Add
 **Defaults:** None.
 
 **Behavior:**
-1. `p_record_type` is `schedule`, `event`, `observation`, `note` or `expense`.
+1. `p_record_type` is `schedule`, `event`, `observation`, `note` or `expense`. Any other value returns "invalid input".
 2. The function removes the Remark with `p_remark_id` from `remarks`. Other Remarks keep their order and content.
 3. A deleted Record returns "record deleted". An unknown `p_remark_id` returns "record not found".
 4. A Remark removal on an Expense creates no correction version.
@@ -1107,7 +1112,7 @@ Derived fields on every Expense return:
 1. `discrepancies` — comparison checks only. Stored values never change because of them.
    - `{ "check": "lines_sum", "expense_total", "lines_sum" }` when the Expense has Lines and their sum differs from `expense_total`.
    - `{ "check": "quantity_x_unit_price", "line_id", "line_total", "computed" }` for each Line whose `quantity × unit_price` differs from `line_total`.
-2. `refunds` — on a purchase, the active Refund Expenses with `refund_of` equal to its ID.
+2. `refunds` — on a purchase, the active Refund Expenses with `refund_of` equal to its ID. Each item is `{ "id", "transaction_date", "transaction_time", "expense_total", "currency" }`. Items are ordered by `transaction_date`, then by creation time. A Refund returns `[]`.
 3. `version` — the current correction version number, from 1.
 
 Line validation:
@@ -1133,7 +1138,7 @@ Line validation:
 **Behavior:**
 1. `expense_type` and `refund_of` are not accepted. A Refund uses 6.8.
 2. `expense_total` is zero or positive. For a zero total, the Agent supplies the Cash Payment Method Subject.
-3. Supplied Subject IDs are active Subjects. A missing Merchant or Item Subject does not prevent the save.
+3. Supplied Subject IDs are active Subjects (1.5 item 14). A missing Merchant or Item Subject does not prevent the save.
 4. `line_no` follows the order of `lines`.
 5. A purchase on credit, such as PayLater or a credit card, is one Expense on its original Transaction Date. Its Payment Method Subject shows the credit.
 
@@ -1185,7 +1190,7 @@ Line validation:
 1. `keyword` matches `merchant_name`, `branch`, `seller_name`, Line `item_description`, Line `source_item_text` and Remark text.
 2. `from_date` and `to_date` filter `transaction_date` inclusively.
 3. `category`, `tag` and `item_subject_id` match when at least one Line matches.
-4. Results are ordered by `transaction_date` descending, then `transaction_time` descending.
+4. Results are ordered by `transaction_date` descending, then `transaction_time` descending. An unknown `transaction_time` comes after the known times of the same date.
 
 **Returns:** The search return shape (1.5 item 4) with complete Expense Records.
 
@@ -1206,10 +1211,19 @@ Line validation:
 **Behavior:**
 1. Before the change, the function saves a snapshot of the current Expense and its Lines as one history version.
 2. The function then changes the Expense in place. Its ID stays the same, so every link stays valid.
-3. A supplied `lines` replaces the whole Line set and follows the Line validation.
-4. `correction_reason` is required and non-empty. It is stored on the history version. It is not a stored Expense field.
+3. A supplied `lines` replaces the whole Line set with new Lines and follows the Line validation. A purchase correction without `lines` leaves every Line unchanged, including its `updated_at`.
+4. `correction_reason` is required and non-empty. It is stored as the `correction_reason` of the version that the correction produces (6.6). It is not a stored Expense field.
 5. `expense_type`, `refund_of` and `remarks` are not change fields. Remarks use 4.6.
-6. A Refund change keeps the 6.8 shape. The Payment Method and Currency stay those of the original Expense.
+6. A Refund change keeps the 6.8 shape. The Payment Method and Currency stay those of the original Expense. The Refund Line changes only when the correction supplies `refund_amount`, `item_description`, `item_subject_id` or `line_type`.
+7. On a purchase, `expense_total` stays zero or positive (6.1 item 2).
+8. The Refund limits hold on the state after the correction. On a Refund, the function checks the purchase that `refund_of` names:
+   - The `refund_amount` after the correction plus the amounts of the other active Refunds of that purchase is at most the purchase `expense_total`.
+   - The `transaction_date` after the correction is on or after the purchase `transaction_date`. The same day is allowed.
+9. On a purchase, the function checks its active Refunds:
+   - The `expense_total` after the correction is at least the sum of the amounts of its active Refunds. The check also applies to a correction that supplies `lines`.
+   - The `transaction_date` after the correction is on or before the `transaction_date` of every active Refund.
+10. A violation of item 8 or 9 returns "invalid input". The function rejects the whole correction and saves no history version.
+11. A Refund whose purchase is deleted has no limit from that purchase.
 
 **Returns:** The complete Expense Record after the correction.
 
@@ -1221,7 +1235,7 @@ Line validation:
 
 **Defaults:** None.
 
-**Behavior:** Versions are ordered oldest to newest. The last item is the current Expense.
+**Behavior:** Versions are ordered oldest to newest. The last item is the current Expense. Each version after the first carries the `correction_reason` and `corrected_at` of the correction or deletion that produced it.
 
 **Returns:** `{ "id": uuid, "history": [ { "version": number, "snapshot": <Expense with lines>, "correction_reason": text or null, "corrected_at": timestamp or null } ] }`. The first version has `corrected_at = null`.
 
@@ -1235,8 +1249,8 @@ Line validation:
 
 **Behavior:**
 1. An empty `p_text` returns "invalid input". The function saves a snapshot as a history version with `correction_reason = p_text`.
-2. It then follows 1.5 items 8 and 9.
-3. Refunds of a deleted original stay. Their `refund_of` is returned as `null`. Each Refund counts by its own amount and date (6.9 item 2).
+2. It then follows 1.5 items 8 and 9. Deleting an already deleted Expense saves no history version. It returns the existing `deleted_at`.
+3. Refunds of a deleted original stay. Their `refund_of` is returned as `null`. Each Refund counts by its own amount and date (6.9 item 2). Its corrections have no limit from the deleted original (6.5 item 11).
 
 **Returns:** `{ "id": uuid, "deleted_at": timestamp }`.
 
@@ -1253,7 +1267,7 @@ Line validation:
 **Defaults:** `item_description = null`, `item_subject_id = null`, `remarks = []`, `metadata = {}`.
 
 **Behavior:**
-1. The original is an active purchase Expense.
+1. The original is an active purchase Expense. An original that is a Refund returns "invalid relationship". A deleted original returns "record deleted".
 2. `refund_amount` is positive. It is the actual refunded amount, so a partial Refund uses its partial amount.
 3. `refund_amount` is at most the original `expense_total` minus the totals of the active Refunds already recorded for that original. A larger amount returns "invalid input".
 4. `transaction_date` is on or after the original's `transaction_date`. An earlier date returns "invalid input".
@@ -1352,7 +1366,7 @@ Reading fields:
 | `remark_entries` | jsonb array | The Reading Remark (7.3). |
 | `metadata` | jsonb | 1.5 item 11. |
 
-Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Analysis of the Divination Record), `source` (required: the AI system, person, application or channel), `overall_outcome` (required), `key_reasoning` (required), `story_context` (optional), `analysis_date` (date), `metadata`.
+Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Analysis of the Divination Record), `source` (required: the AI system, person, application or channel), `overall_outcome` (required), `key_reasoning` (required), `story_context` (optional), `analysis_date` (date), `metadata`. `analysis_date` is the date of the Analysis itself. Timeline shows every Analysis under the `reading_date` of its Reading (9.1 item 8).
 
 ## 7.1 Divination Record and Reading
 
@@ -1376,7 +1390,7 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 1. The function creates the Divination Record, its Readings, the Reading Analyses and the combined `record_analyses` in one transaction.
 2. `result_text` is stored as supplied.
 3. A combined Analysis is stored once on the Divination Record with `reading_id = null`.
-4. Every `story_person_ids` value is an active Story Person.
+4. Every `story_person_ids` value is an active Story Person (1.5 item 14).
 5. No call happens when the user declines the save.
 
 **Returns:** The complete Divination Record with `readings`, each Reading's `analyses`, and `record_analyses`.
@@ -1389,7 +1403,10 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 
 **Defaults:** None.
 
-**Behavior:** Follows 1.5 item 3. The return holds Key Reasoning, Story Context and Reading Remarks for the Agent to show when the user asks.
+**Behavior:**
+1. Follows 1.5 item 3. The return holds Key Reasoning, Story Context and Reading Remarks for the Agent to show when the user asks.
+2. An active Divination Record returns its active Readings and Analyses.
+3. A deleted Divination Record returns the Readings and Analyses deleted together with it, each with its `deleted_at`.
 
 **Returns:** The complete Divination Record with `readings`, `analyses`, `record_analyses`, `remark_entries` and each Reading's `"links": [...]` (4.5.3).
 
@@ -1407,8 +1424,8 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 1. `keyword` matches the Divination Record `title` and `topic`, and the Reading `question` and `result_text`.
 2. `subject_id` matches Readings linked to that Subject by a Record link, and Readings whose Story Persons have that `subject_id`.
 3. `from_date` and `to_date` filter `reading_date` inclusively.
-4. Each result is one Divination Record with only its matching Readings.
-5. The short view of each Reading holds `id`, `question`, `method`, `result_text`, `reading_date` and the `overall_outcome` and `source` of each Analysis. Combined Analyses appear the same way on the Divination Record.
+4. Each result is one Divination Record with only its matching Readings. When `keyword` matches the Divination Record `title` or `topic`, every Reading of that Record matches the keyword.
+5. Each result holds `id`, `session_date`, `title`, `topic`, `deleted_at`, `readings` and `record_analyses`. The short view of each Reading holds `id`, `question`, `method`, `result_text`, `reading_date` and the `overall_outcome` and `source` of each Analysis. Combined Analyses appear the same way on the Divination Record.
 6. Results are ordered by the latest `reading_date` descending.
 
 **Returns:** The search return shape (1.5 item 4).
@@ -1423,7 +1440,7 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 
 **Defaults:** None.
 
-**Behavior:** Follows 1.5 item 6. Readings and Analyses stay unchanged. Their Question, Result and Analysis content have no update function.
+**Behavior:** Follows 1.5 item 6. `session_date` is required, so `null` returns "invalid input". Readings and Analyses stay unchanged. Their Question, Result and Analysis content have no update function.
 
 **Returns:** The complete Divination Record after the update.
 
@@ -1449,7 +1466,7 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 
 **Supported p_input fields:** The 7.1.1 `readings` item fields plus `divination_record_id`.
 
-**Defaults:** `reading_date` = today. Arrays default to `[]`.
+**Defaults:** `reading_date` = today. Analysis `analysis_date` = today. Arrays default to `[]`.
 
 **Behavior:** Earlier Readings stay unchanged.
 
@@ -1466,7 +1483,7 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 **Defaults:** None.
 
 **Behavior:**
-1. The supplied array replaces the Reading's Story Person set. Every value is an active Story Person.
+1. The supplied array replaces the Reading's Story Person set. Every value is an active Story Person (1.5 item 14). A repeated ID is stored once.
 2. The change touches only the association. It is not an edit. The Reading's `updated_at`, Question, Result and Analyses stay unchanged.
 3. A Reading has no structured link to a Storyline.
 
@@ -1519,7 +1536,7 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 
 ## 7.3 Reading Remark
 
-A Reading has one Reading Remark made of entries. Entry fields: `entry_id` (uuid), `timestamp` (UTC), `storyline_id` (uuid or `null`), `text`. The `storyline_id` is an explanatory reference without a foreign key or Record link.
+A Reading has one Reading Remark made of entries. Entry fields: `entry_id` (uuid), `timestamp` (UTC), `storyline_id` (uuid or `null`), `text` (trimmed text). The `storyline_id` is an explanatory reference without a foreign key or Record link. Adding, changing and removing an entry leave the `updated_at` of the Divination Record unchanged.
 
 ### 7.3.1 reading_remark_add
 
@@ -1533,7 +1550,7 @@ A Reading has one Reading Remark made of entries. Entry fields: `entry_id` (uuid
 
 **Defaults:** `storyline_id = null`. `timestamp` = current time.
 
-**Behavior:** The function appends one entry with a new `entry_id`. The Reading's `updated_at` and its Analyses stay unchanged.
+**Behavior:** The function appends one entry with a new `entry_id` and the trimmed `text`. A deleted Reading returns "record deleted". The Reading's `updated_at` and its Analyses stay unchanged.
 
 **Returns:** The complete Reading with `remark_entries`.
 
@@ -1543,13 +1560,17 @@ A Reading has one Reading Remark made of entries. Entry fields: `entry_id` (uuid
 
 **Purpose:** Correct one Reading Remark entry under the approved cutoff flow.
 
-**Required p_input fields:** `entry_id`, and `text` or `storyline_id`.
+**Required p_input fields:** `entry_id`, `text`.
 
 **Supported p_input fields:** `entry_id`, `text`, `storyline_id`.
 
-**Defaults:** None.
+**Defaults:** `storyline_id = null`.
 
-**Behavior:** The function replaces the supplied fields of that entry. Its `entry_id` and `timestamp` stay. The Reading's `updated_at` stays unchanged, because the function changes only a Remark entry.
+**Behavior:**
+1. The function replaces the whole content of the entry with `entry_id`. `text` becomes the trimmed supplied text. `storyline_id` becomes the supplied value, or `null` when it is omitted.
+2. The entry keeps its `entry_id` and `timestamp`. Other entries keep their order and content.
+3. A missing or blank `text` returns "invalid input". An unknown `entry_id` returns "record not found". A deleted Reading returns "record deleted".
+4. The Reading's `updated_at` and its Analyses stay unchanged, because the function changes only a Remark entry.
 
 **Returns:** The complete Reading with `remark_entries`.
 
@@ -1588,7 +1609,7 @@ Story Person fields: `name` (required), `gender`, `description` (identifying clu
 
 **Defaults:** `aliases = []`, `subject_id = null`, `metadata = {}`.
 
-**Behavior:** A supplied `subject_id` is an active Subject. The Agent supplies it only after the user approves the association.
+**Behavior:** A supplied `subject_id` is an active Subject (1.5 item 14). The Agent supplies it only after the user approves the association.
 
 **Returns:** The complete Story Person.
 
@@ -1661,8 +1682,9 @@ Storyline fields: `title`, `content` (required), `occurrence_date`, `occurrence_
 **Defaults:** `story_person_ids = []`, `metadata = {}`. Unknown dates stay `null`.
 
 **Behavior:**
-1. Every `story_person_ids` value is an active Story Person.
+1. Every `story_person_ids` value is an active Story Person (1.5 item 14).
 2. A Storyline that describes the same matter as a Personal Event links to it with 4.5.1.
+3. `occurrence_date` and `occurrence_end_date` are stored as supplied. The function does not compare them.
 
 **Returns:** The complete Storyline.
 
@@ -1689,8 +1711,8 @@ Storyline fields: `title`, `content` (required), `occurrence_date`, `occurrence_
 **Defaults:** `person_match = "any"`, `limit = 20`, `offset = 0`, `include_deleted = false`.
 
 **Behavior:**
-1. `person_match = "any"` returns Storylines with at least one supplied Story Person. `person_match = "all"` returns Storylines with every supplied Story Person.
-2. Each result holds `matched_person_ids`. The Agent uses it to tell shared, subgroup and individual Storylines apart.
+1. `person_match = "any"` returns Storylines with at least one supplied Story Person. `person_match = "all"` returns Storylines with every supplied Story Person. Any other value returns "invalid input".
+2. Each result holds `matched_person_ids`. The Agent uses it to tell shared, subgroup and individual Storylines apart. Without `story_person_ids`, `matched_person_ids` is `[]`.
 3. `keyword` matches `title`, `content` and `time_text`.
 4. `from_date` and `to_date` filter `occurrence_date` inclusively. Storylines with unknown `occurrence_date` match only when no date filter is supplied.
 5. Results are ordered by `occurrence_date` descending with `null` last, then `created_at` descending, then `id` ascending.
@@ -1733,6 +1755,8 @@ Communication Rule fields: `profile_id` (`null` = Global scope), `language_mode`
 
 Message History fields: `profile_id`, `message_text`, `language_mode`, `platform`, `intent`, `message_mode`, `metadata`, `finalized_at`.
 
+`profile_key` is the stable Agent-facing key of a Profile. `aliases` holds other names of the Profile. `intent` and `message_mode` are optional free text that the Agent sets to describe a message. Apart from the uniqueness of `profile_key`, the functions store these four fields as supplied without further rules.
+
 ## 8.1 Profiles
 
 ### 8.1.1 communication_profile_create
@@ -1750,7 +1774,7 @@ Message History fields: `profile_id`, `message_text`, `language_mode`, `platform
 **Behavior:**
 1. A Person Profile identifies exactly one active Subject, approved by the user.
 2. A Subject has at most one active Person Profile. A second one returns "invalid relationship".
-3. A Group or Audience Profile has no `person_subject_id`.
+3. A Group or Audience Profile has no `person_subject_id`. A supplied `person_subject_id` on a Group or Audience returns "invalid input".
 
 **Returns:** The complete Profile.
 
@@ -1819,9 +1843,10 @@ Message History fields: `profile_id`, `message_text`, `language_mode`, `platform
 **Defaults:** `p_priority = 0`, `p_metadata = {}`.
 
 **Behavior:**
-1. The parent is an active Audience Profile.
+1. The child is an active Person, Group or Audience Profile. The parent is an active Audience Profile (1.5 item 14). A parent of another Profile type returns "invalid relationship".
 2. Self-membership and inheritance cycles return "invalid relationship".
 3. Membership does not establish Group participants or Subject identity.
+4. An Audience that inherits from another Audience adds one inheritance level. The nearer level wins in Rule resolution (8.2.4 item 2).
 
 **Returns:** `{ "child_profile_id", "parent_profile_id", "priority", "metadata", "created_at", "updated_at" }`.
 
@@ -1878,7 +1903,12 @@ Message History fields: `profile_id`, `message_text`, `language_mode`, `platform
 
 **Defaults:** `p_profile_id = null` returns Global Rules only. `p_language_mode = null` returns neutral Rules only.
 
-**Behavior:** The function returns Profile Rules, Rules inherited through every Audience ancestor and Global Rules. With `p_language_mode`, it returns the matching language-specific Rules and the neutral Rules.
+**Behavior:**
+1. The function returns Profile Rules, Rules inherited through every Audience ancestor and Global Rules. With `p_language_mode`, it returns the matching language-specific Rules and the neutral Rules.
+2. `depth` and `priority` depend on `scope`:
+   - `profile`: `depth = 0` and `priority = null`.
+   - `inherited`: `depth` is the inheritance level of the source Audience, from 1. `priority` is its membership priority.
+   - `global`: `depth = null` and `priority = null`.
 
 **Returns:** `{ "profile_id", "language_mode", "rules": [ { "id", "dimension", "rule_key", "rule_text", "language_mode", "scope": "profile" | "inherited" | "global", "source_profile_id", "depth", "priority" } ] }`.
 
@@ -1910,7 +1940,7 @@ Message History fields: `profile_id`, `message_text`, `language_mode`, `platform
 
 **Behavior:**
 1. Effective Rules follow 8.2.4.
-2. Recent messages are active Message History of the Profile and Language Mode, newest first.
+2. Recent messages are active Message History of the Profile and Language Mode, newest first. With `p_profile_id = null`, they are messages saved without a Profile. With `p_language_mode = null`, they are messages saved without a Language Mode.
 3. Messages on `p_platform` rank first when it is supplied. Platform is not a Rule inheritance layer.
 
 **Returns:** `{ "profile", "language_mode", "platform", "effective_rules", "recent_messages": [...] }`.
@@ -1934,6 +1964,9 @@ Message History fields: `profile_id`, `message_text`, `language_mode`, `platform
 2. The message is saved even when `rule_changes` is empty.
 3. The function decides nothing about learning. It applies only the supplied changes.
 4. Drafts and abandoned messages are never sent to this function.
+5. `rule_changes_applied` holds one item per Rule change, in input order:
+   - An upsert returns the complete Rule plus `"action": "created"` or `"updated"`, as in 8.2.1.
+   - A delete returns `{ "id": uuid, "action": "deleted", "removed": boolean }`. An unknown Rule ID returns `"removed": false`, and the finalize still saves.
 
 **Returns:** `{ "message": <complete Message History item>, "rule_changes_applied": [...], "runtime_context": <8.3.1 return> }`.
 
@@ -1996,7 +2029,7 @@ Timeline is the data layer of the LifeOS Timeline function. The Agent layer deci
 **Defaults:** `date_basis = "occurrence"`.
 
 **Behavior:**
-1. The included Record Types are Schedule, Event, Observation, Note, Expense (purchase and Refund), Reading and Communication Message. 9.3 names their date fields.
+1. The included Record Types are Schedule, Event, Observation, Note, Expense (purchase and Refund), Reading and Communication Message. 9.3 names their date fields. An item's `record_type` is the Record Type name (1.5 item 2), or `communication_message` for a Communication Message.
 2. Excluded are Storylines, System Activity and deleted Records. Memory, Notebook, Subject, Story Person, Profile and Rule have no occurrence date and are not items.
 3. Each item carries `subjects`: every active Subject connected to the Record. Subject connects the Records of all Modules. The connection paths are:
    - A Record link.
@@ -2006,7 +2039,7 @@ Timeline is the data layer of the LifeOS Timeline function. The Agent layer deci
 
    For a Reading, a Subject reached by both a Record link and a Story Person appears once, with `via = record_link` (4.5.3 item 5).
 4. The function applies no further filter and no limit.
-5. With `date_basis = "occurrence"`, a Record is included when its occurrence date is in the period. With `date_basis = "record"`, it is included when its record date is in the period.
+5. With `date_basis = "occurrence"`, a Record is included when its occurrence date is in the period. With `date_basis = "record"`, it is included when its record date is in the period. Another `date_basis` value returns "invalid input". A `from_date` after `to_date` returns "invalid input".
 6. Schedules of every Status are included. An Occurred Schedule carries `linked_event_id`.
 7. Each Event carries its `observations`. Observations are also returned as their own items with `event_id`.
 8. Each Reading item carries its own Analyses and the combined Analyses of its Divination Record. Analyses are not separate items.
@@ -2058,7 +2091,7 @@ Timeline is the data layer of the LifeOS Timeline function. The Agent layer deci
 2. `record_types` accepts `schedule`, `event`, `observation`, `note`, `expense`, `reading`, `storyline` and `communication_message`.
 3. `from_date` and `to_date` filter the occurrence date (9.3). Storyline uses `occurrence_date`.
 4. Deleted Records are omitted. A deleted Subject returns "record not found".
-5. Results are ordered by occurrence date descending.
+5. Results are ordered by occurrence date descending. The order of Records within one date is not fixed.
 6. The function returns stored Records only. The Agent decides priority and range.
 
 **Returns:** The search return shape (1.5 item 4). Each result is `{ "record_type", "id", "via", "occurrence_date", "record" }`. `via` uses the 4.5.3 values.
@@ -2075,5 +2108,5 @@ Every business date and time is an Asia/Kuala_Lumpur wall-clock value (1.7).
 | Note | `note_date` = KL date of `edited_at` when set, otherwise of `created_at` | `created_at` (KL date) | `created_at`, `updated_at`, `deleted_at` |
 | Expense (purchase and Refund) | `transaction_date`, with `transaction_time` | `created_at` (KL date) | `created_at`, `updated_at`, `deleted_at`, history `corrected_at` |
 | Reading, with its Analyses | `reading_date`, with `reading_time` (original Reading Date) | `created_at` (KL date) | `created_at`, `updated_at`, `deleted_at`, Analysis `created_at` |
-| Communication Message | `finalized_at` (KL date and time). It alone does not establish delivery. | `finalized_at` (KL date) | `created_at`, `deleted_at` |
+| Communication Message | `finalized_at` (KL date and time). It alone does not establish delivery. | `finalized_at` (KL date) | `created_at`, `updated_at`, `deleted_at` |
 | Storyline (excluded from Timeline) | `occurrence_date` | `created_at` (KL date) | `created_at`, `updated_at`, `deleted_at` |

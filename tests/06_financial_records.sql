@@ -18,6 +18,8 @@
 --   13. expense_spending_report_leaves_adjustment_lines_out_of_category_and_tag
 --   14. expense_create_batch_error_ends_with_item_index
 --   15. expense_refund_create_rejects_amount_above_original_and_date_before_original
+--   16. expense_update_on_refund_keeps_amount_and_date_limits
+--   17. expense_update_on_purchase_keeps_total_and_date_limits_of_active_refunds
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -581,6 +583,86 @@ begin
   r2 := lifeos.expense_refund_create(base || '{"refund_amount":40,"transaction_date":"2032-11-16"}');
   perform pg_temp.chk((r2->>'expense_total')::numeric = -40, 'a deleted Refund leaves room for a new Refund');
   perform pg_temp.chk(jsonb_array_length(lifeos.expense_read((o->>'id')::uuid)->'refunds') = 2 and (lifeos.expense_read((o->>'id')::uuid)->>'expense_total')::numeric = 100, 'the original stays unchanged with two active Refunds');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 16. Refund correction: at most the purchase total, never dated before it (J-0018 F2, F-Q1)
+do $t$
+declare t constant text := 'expense_update_on_refund_keeps_amount_and_date_limits';
+  pm uuid := pg_temp.mk_subject('Card Refund Correction', 'payment method'); o jsonb; o2 jsonb; r1 jsonb; r2 jsonb; r3 jsonb; u jsonb; base jsonb;
+begin
+  o := lifeos.expense_create(jsonb_build_object('transaction_date','2032-12-10','merchant_name','RefundFixShop','payment_method_subject_id', pm,'expense_total', 100,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',100,'line_total',100,'category','clothing'))));
+  base := jsonb_build_object('refund_of', o->>'id','line_type','item');
+  r1 := lifeos.expense_refund_create(base || '{"refund_amount":60,"transaction_date":"2032-12-12"}');
+  r2 := lifeos.expense_refund_create(base || '{"refund_amount":30,"transaction_date":"2032-12-13"}');
+  -- an amount that takes the active Refunds above the purchase total is rejected
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"refund_amount":70.01,"correction_reason":"x"}')$$, r1->>'id'), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"refund_amount":150,"correction_reason":"x"}')$$, r1->>'id'), 'invalid input');
+  -- a date before the purchase date is rejected
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"transaction_date":"2032-12-09","correction_reason":"x"}')$$, r2->>'id'), 'invalid input');
+  -- a rejected correction changes nothing and saves no history version
+  u := lifeos.expense_read((r1->>'id')::uuid);
+  perform pg_temp.chk((u->>'expense_total')::numeric = -60 and (u->>'version')::int = 1 and (u->'lines'->0->>'line_total')::numeric = -60, 'a rejected correction leaves the Refund and its Line unchanged');
+  perform pg_temp.chk(jsonb_array_length(lifeos.expense_history((r1->>'id')::uuid)->'history') = 1 and jsonb_array_length(lifeos.expense_history((r2->>'id')::uuid)->'history') = 1, 'a rejected correction saves no history version');
+  -- the limit itself and the purchase date are accepted
+  u := lifeos.expense_update((r1->>'id')::uuid, '{"refund_amount":70,"correction_reason":"Credit note said 70"}');
+  perform pg_temp.chk((u->>'expense_total')::numeric = -70 and (u->>'version')::int = 2, 'Refunds that sum to the purchase total are accepted');
+  u := lifeos.expense_update((r2->>'id')::uuid, '{"transaction_date":"2032-12-10","correction_reason":"Same-day refund"}');
+  perform pg_temp.chk(u->>'transaction_date' = '2032-12-10', 'a Refund dated on the purchase date is accepted');
+  -- a correction of other fields keeps working inside the limits
+  u := lifeos.expense_update((r2->>'id')::uuid, '{"item_description":"returned item","correction_reason":"Credit note text"}');
+  perform pg_temp.chk(u->'lines'->0->>'item_description' = 'returned item' and (u->>'expense_total')::numeric = -30, 'a correction without amount or date is accepted');
+  -- a deleted Refund does not count
+  perform lifeos.expense_delete((r2->>'id')::uuid, 'entered twice');
+  u := lifeos.expense_update((r1->>'id')::uuid, '{"refund_amount":100,"correction_reason":"Full refund"}');
+  perform pg_temp.chk((u->>'expense_total')::numeric = -100, 'a deleted Refund leaves room for the correction');
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"refund_amount":100.01,"correction_reason":"x"}')$$, r1->>'id'), 'invalid input');
+  -- a Refund of a deleted purchase keeps no limit
+  o2 := lifeos.expense_create(jsonb_build_object('transaction_date','2032-12-20','merchant_name','RefundFixShop2','payment_method_subject_id', pm,'expense_total', 50,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',50,'line_total',50,'category','clothing'))));
+  r3 := lifeos.expense_refund_create(jsonb_build_object('refund_of', o2->>'id','refund_amount',20,'transaction_date','2032-12-22','line_type','item'));
+  perform lifeos.expense_delete((o2->>'id')::uuid, 'wrong receipt');
+  u := lifeos.expense_update((r3->>'id')::uuid, '{"refund_amount":80,"transaction_date":"2032-12-01","correction_reason":"Purchase was deleted"}');
+  perform pg_temp.chk((u->>'expense_total')::numeric = -80 and u->>'transaction_date' = '2032-12-01', 'a Refund of a deleted purchase counts by its own amount and date');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 17. Purchase correction: total at least its active Refunds, dated on or before them (J-0018 4.8)
+do $t$
+declare t constant text := 'expense_update_on_purchase_keeps_total_and_date_limits_of_active_refunds';
+  pm uuid := pg_temp.mk_subject('Card Purchase Correction', 'payment method'); o jsonb; r1 jsonb; r2 jsonb; u jsonb; id uuid; base jsonb;
+begin
+  o := lifeos.expense_create(jsonb_build_object('transaction_date','2033-01-10','merchant_name','PurchaseFixShop','payment_method_subject_id', pm,'expense_total', 100,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',100,'line_total',100,'category','clothing'))));
+  id := (o->>'id')::uuid;
+  base := jsonb_build_object('refund_of', o->>'id','line_type','item');
+  r1 := lifeos.expense_refund_create(base || '{"refund_amount":40,"transaction_date":"2033-01-12"}');
+  r2 := lifeos.expense_refund_create(base || '{"refund_amount":30,"transaction_date":"2033-01-15"}');
+  -- a total below the active Refunds is rejected, also when the correction replaces the Lines
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"expense_total":69.99,"correction_reason":"x"}')$$, id), 'invalid input');
+  perform pg_temp.expect_err(format('select lifeos.expense_update(%L::uuid, %L::jsonb)', id, jsonb_build_object('expense_total', 50,'correction_reason','x',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',50,'line_total',50,'category','clothing')))), 'invalid input');
+  -- a date after an active Refund is rejected
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"transaction_date":"2033-01-13","correction_reason":"x"}')$$, id), 'invalid input');
+  -- a rejected correction changes nothing and saves no history version
+  u := lifeos.expense_read(id);
+  perform pg_temp.chk((u->>'expense_total')::numeric = 100 and u->>'transaction_date' = '2033-01-10' and (u->>'version')::int = 1 and (u->'lines'->0->>'line_total')::numeric = 100, 'a rejected correction leaves the purchase and its Lines unchanged');
+  perform pg_temp.chk(jsonb_array_length(lifeos.expense_history(id)->'history') = 1, 'a rejected correction saves no history version');
+  -- the limits themselves are accepted: a total equal to the Refunds, a date equal to the earliest Refund
+  u := lifeos.expense_update(id, jsonb_build_object('expense_total', 70,'correction_reason','Receipt total was 70',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',70,'line_total',70,'category','clothing'))));
+  perform pg_temp.chk((u->>'expense_total')::numeric = 70 and (u->'lines'->0->>'line_total')::numeric = 70 and (u->>'version')::int = 2, 'a total equal to the active Refunds is accepted');
+  u := lifeos.expense_update(id, '{"transaction_date":"2033-01-12","correction_reason":"Bought on the refund day"}');
+  perform pg_temp.chk(u->>'transaction_date' = '2033-01-12' and (u->>'version')::int = 3, 'a purchase dated on its earliest Refund date is accepted');
+  -- a deleted Refund does not count
+  perform lifeos.expense_delete((r1->>'id')::uuid, 'entered twice');
+  u := lifeos.expense_update(id, '{"expense_total":30,"transaction_date":"2033-01-15","correction_reason":"Only one refund remains"}');
+  perform pg_temp.chk((u->>'expense_total')::numeric = 30 and u->>'transaction_date' = '2033-01-15', 'a deleted Refund leaves room for the purchase correction');
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"expense_total":29.99,"correction_reason":"x"}')$$, id), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"transaction_date":"2033-01-16","correction_reason":"x"}')$$, id), 'invalid input');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

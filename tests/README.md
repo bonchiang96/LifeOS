@@ -14,8 +14,8 @@ The tests call only functions of the schema `lifeos`. Error tests compare the ex
 | `03_notebook.sql` | Notebook | 3 | 8 |
 | `04_personal_records.sql` | Personal Records | 4 | 18 |
 | `05_subject.sql` | Subject | 5 | 8 |
-| `06_financial_records.sql` | Financial Records | 6 | 15 |
-| `07_divination_reflection.sql` | Divination & Reflection | 7 | 14 |
+| `06_financial_records.sql` | Financial Records | 6 | 17 |
+| `07_divination_reflection.sql` | Divination & Reflection | 7 | 15 |
 | `08_communication_assistant.sql` | Communication Assistant | 8 | 12 |
 | `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | 9 | 10 |
 
@@ -47,7 +47,7 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 4. `03_notebook.sql`, test 8, deletes the seeded `note_types` row, so the first read creates it with the five default Note Types.
 5. `02_memory.sql` test 4 and `08_communication_assistant.sql` tests 10 and 11 spread `updated_at` and `finalized_at` to prove the newest-first ordering.
 6. `04_personal_records.sql`, test 17, moves `updated_at` of one Schedule, and `created_at` and `updated_at` of one Note. A transaction has one clock value, so this is the only way to show that a Remark change or removal leaves these dates unchanged.
-7. `07_divination_reflection.sql`, tests 13 and 14, each move `updated_at` of one Reading. A transaction has one clock value, so only this shows that a Reading Remark removal and a Story Person change leave `updated_at` unchanged.
+7. `07_divination_reflection.sql`, tests 13, 14 and 15, each move `updated_at` of one Reading. A transaction has one clock value, so only this shows that `updated_at` stays unchanged. The three changes are a Reading Remark removal, a Story Person change and a Reading Remark change.
 
 ## Coverage
 
@@ -107,6 +107,8 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Credit purchase and repayment | `credit_purchase_is_one_expense_and_repayment_is_not_in_report` | `06_financial_records.sql` |
 | Batch rejection names the invalid item | `expense_create_batch_error_ends_with_item_index` | `06_financial_records.sql` |
 | Refund within the original amount and date | `expense_refund_create_rejects_amount_above_original_and_date_before_original` | `06_financial_records.sql` |
+| Refund correction within the purchase amount and date | `expense_update_on_refund_keeps_amount_and_date_limits` | `06_financial_records.sql` |
+| Purchase correction keeps its total and date within its active Refunds | `expense_update_on_purchase_keeps_total_and_date_limits_of_active_refunds` | `06_financial_records.sql` |
 | Divination save with Readings and Analyses | `divination_save_readings_and_analyses` | `07_divination_reflection.sql` |
 | Divination save validation | `divination_save_rejects_invalid_input` | `07_divination_reflection.sql` |
 | Divination search, short view | `divination_search_short_view` | `07_divination_reflection.sql` |
@@ -121,6 +123,7 @@ Some setups use a direct `update` or `delete` because the Contract has no functi
 | Storyline update, delete and links | `storyline_update_delete_and_links` | `07_divination_reflection.sql` |
 | Reading Remark entry removal, updated_at and Analyses unchanged | `reading_remark_delete_keeps_reading_updated_at_and_analyses` | `07_divination_reflection.sql` |
 | Story Person change on a saved Reading is not an edit | `reading_story_persons_set_leaves_reading_updated_at_unchanged` | `07_divination_reflection.sql` |
+| Reading Remark change replaces the whole entry | `reading_remark_update_replaces_whole_entry` | `07_divination_reflection.sql` |
 | Communication Profiles | `profile_create_person_group_audience_rules` | `08_communication_assistant.sql` |
 | Profile search, update and Person Subject link | `profile_search_update_and_person_link` | `08_communication_assistant.sql` |
 | Audience inheritance | `membership_set_remove_and_rejections` | `08_communication_assistant.sql` |
