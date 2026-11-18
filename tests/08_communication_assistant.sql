@@ -15,6 +15,7 @@
 --   10. runtime_context_recent_messages_and_platform
 --   11. message_history_search_read_delete
 --   12. profile_delete_stops_rules_keeps_history
+--   13. profile_and_message_search_filter_by_deleted_record_id_matches_nothing
 --
 -- A fixture block between tests 4 and 5 builds the Profiles and Rules that tests 5 to 7 resolve.
 -- Test setup that the Contract has no function for: tests 10 and 11 move
@@ -418,7 +419,9 @@ begin
   d := lifeos.communication_profile_delete(aud);
   perform pg_temp.chk(d->>'deleted_at' is not null, 'delete returns deleted_at');
   perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(person, null), 'tone', 'inherit-me') is null, 'the deleted Audience''s Rules stop applying');
-  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', aud, 'keyword','xqdel'))->>'returned_count')::int = 1, 'the deleted Profile''s Message History stays');
+  perform pg_temp.chk((lifeos.communication_message_history_search('{"keyword":"xqdel"}')->>'returned_count')::int = 1, 'the deleted Profile''s Message History stays');
+  -- M-0021 D10: a filter by the deleted Profile ID matches nothing
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', aud, 'keyword','xqdel'))->>'returned_count')::int = 0, 'a filter by the deleted Profile ID matches nothing');
   perform pg_temp.chk(lifeos.communication_profile_read(aud)->>'deleted_at' is not null, 'profile_read returns the deleted Profile');
   perform pg_temp.chk((lifeos.communication_profile_search('{"keyword":"del-aud"}')->>'returned_count')::int = 0, 'search hides the deleted Profile');
   -- deleting a Person Profile ends its Person Subject link
@@ -428,6 +431,27 @@ begin
   again := pg_temp.mk_profile('del-person-2', 'person', s);
   perform pg_temp.chk(again is not null, 'the Subject can take a new Person Profile');
   perform pg_temp.expect_err(format($$select lifeos.communication_profile_update(%L::uuid, '{"name":"x"}')$$, person), 'record deleted');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 13. Profile and Message History search: a filter ID of a deleted Record matches nothing (M-0021 D10)
+do $t$
+declare t constant text := 'profile_and_message_search_filter_by_deleted_record_id_matches_nothing';
+  s uuid := pg_temp.mk_subject('D10 profile person'); pf uuid;
+begin
+  pf := pg_temp.mk_profile('d10-person', 'person', s);
+  perform lifeos.communication_message_finalize(jsonb_build_object('profile_id', pf, 'message_text','d10 message xqd10'));
+  -- active targets match
+  perform pg_temp.chk((lifeos.communication_profile_search(jsonb_build_object('person_subject_id', s))->>'returned_count')::int = 1, 'person_subject_id of an active Subject matches');
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', pf))->>'returned_count')::int = 1, 'profile_id of an active Profile matches');
+  -- deleted targets match nothing, without an error
+  perform lifeos.communication_profile_delete(pf);
+  perform lifeos.subject_delete(s);
+  perform pg_temp.chk((lifeos.communication_profile_search(jsonb_build_object('person_subject_id', s, 'include_deleted', true))->>'returned_count')::int = 0, 'person_subject_id of a deleted Subject matches nothing, also with include_deleted');
+  perform pg_temp.chk((lifeos.communication_profile_search('{"keyword":"d10-person","include_deleted":true}')->>'returned_count')::int = 1, 'the Profile stays findable by keyword with include_deleted');
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', pf))->>'returned_count')::int = 0, 'profile_id of a deleted Profile matches nothing');
+  perform pg_temp.chk((lifeos.communication_message_history_search('{"keyword":"xqd10"}')->>'returned_count')::int = 1, 'the message stays findable by keyword');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

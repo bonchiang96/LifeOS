@@ -21,6 +21,9 @@
 --   16. soft_delete_read_and_search_deleted
 --   17. record_update_remark_and_record_delete_remark_leave_record_dates_unchanged
 --   18. record_link_create_rejects_reading_storyline_pair
+--   19. record_link_create_rejects_divination_record_storyline_pair
+--   20. event_delete_keeps_status_of_deleted_schedule
+--   21. event_and_observation_search_filter_by_deleted_record_id_matches_nothing
 --
 -- Test setup that the Contract has no function for: test 13 moves created_at of
 -- one Note into the past, so the Note date can be told apart from today inside a
@@ -28,6 +31,7 @@
 -- change of updated_at shows inside one transaction. Test 17 moves updated_at of one
 -- Schedule and created_at and updated_at of one Note back in the same way. Test 17
 -- also reads the five Record tables to check that every stored Remark has a remark_id.
+-- Test 20 reads lifeos.events to check that the stored schedule link is removed.
 -- Every other step calls Contract functions only.
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -693,6 +697,80 @@ begin
   ev := lifeos.event_create('{"title":"Link test event","occurred_date":"2032-04-03"}');
   perform pg_temp.chk(lifeos.record_link_create(jsonb_build_object('from_type','reading','from_id', rid,'to_type','event','to_id', ev->>'id'))->>'link_id' is not null, 'a Reading links to an Event');
   perform pg_temp.chk(lifeos.record_link_create(jsonb_build_object('from_type','storyline','from_id', sl->>'id','to_type','event','to_id', ev->>'id'))->>'link_id' is not null, 'a Storyline links to an Event');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 19. A Divination Record and a Storyline never link, in either order (M-0021 D5) ------------------
+do $t$
+declare t constant text := 'record_link_create_rejects_divination_record_storyline_pair';
+  d jsonb; did text; sl jsonb; ev jsonb;
+begin
+  d := lifeos.divination_record_save('{"readings":[{"question":"D5 Q","method":"tarot","result_text":"D5 R"}]}');
+  did := d->>'id';
+  sl := lifeos.storyline_create('{"content":"D5 storyline"}');
+  perform pg_temp.expect_err(format($$select lifeos.record_link_create(jsonb_build_object('from_type','divination_record','from_id', %L::uuid,'to_type','storyline','to_id', %L::uuid))$$, did, sl->>'id'), 'invalid relationship');
+  perform pg_temp.expect_err(format($$select lifeos.record_link_create(jsonb_build_object('from_type','storyline','from_id', %L::uuid,'to_type','divination_record','to_id', %L::uuid))$$, sl->>'id', did), 'invalid relationship');
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(lifeos.record_links_read('divination_record', did::uuid)->'links') l where l->>'record_type' = 'storyline'), 'the Divination Record has no Storyline link');
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(lifeos.record_links_read('storyline', (sl->>'id')::uuid)->'links') l where l->>'record_type' = 'divination_record'), 'the Storyline has no Divination Record link');
+  -- the Reading rule of M-0020 stays, and both Records still link to other Records
+  perform pg_temp.expect_err(format($$select lifeos.record_link_create(jsonb_build_object('from_type','reading','from_id', %L::uuid,'to_type','storyline','to_id', %L::uuid))$$, d->'readings'->0->>'id', sl->>'id'), 'invalid relationship');
+  ev := lifeos.event_create('{"title":"D5 event","occurred_date":"2032-04-04"}');
+  perform pg_temp.chk(lifeos.record_link_create(jsonb_build_object('from_type','divination_record','from_id', did,'to_type','event','to_id', ev->>'id'))->>'link_id' is not null, 'a Divination Record links to an Event');
+  perform pg_temp.chk(lifeos.record_link_create(jsonb_build_object('from_type','storyline','from_id', sl->>'id','to_type','event','to_id', ev->>'id'))->>'link_id' is not null, 'a Storyline links to an Event');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 20. Deleting an Event leaves the Status of its deleted Schedule unchanged (M-0021 D9) --------------
+do $t$
+declare t constant text := 'event_delete_keeps_status_of_deleted_schedule';
+  s jsonb; e jsonb; d jsonb; before jsonb; after jsonb; v_stored uuid;
+begin
+  s := lifeos.schedule_create('{"title":"D9 schedule","planned_date":"2031-11-03"}');
+  e := lifeos.event_create(jsonb_build_object('schedule_id', s->>'id', 'occurred_date', '2031-11-03'));
+  perform pg_temp.chk(e->'schedule'->>'status' = 'occurred', 'the Schedule is Occurred before the deletes');
+  perform lifeos.schedule_delete((s->>'id')::uuid);
+  before := lifeos.schedule_read((s->>'id')::uuid);
+  d := lifeos.event_delete((e->>'id')::uuid);
+  perform pg_temp.chk(d->>'id' = e->>'id' and d->>'deleted_at' is not null, 'delete returns id and deleted_at');
+  perform pg_temp.chk(d ? 'schedule_returned_to_planned' and d->>'schedule_returned_to_planned' is null, 'schedule_returned_to_planned is null for a deleted Schedule');
+  after := lifeos.schedule_read((s->>'id')::uuid);
+  perform pg_temp.chk(after->>'status' = 'occurred', 'the deleted Schedule keeps its Status, got ' || coalesce(after->>'status', 'null'));
+  perform pg_temp.chk(after->>'updated_at' = before->>'updated_at', 'the deleted Schedule is not touched');
+  select x.schedule_id into v_stored from lifeos.events x where x.id = (e->>'id')::uuid;
+  perform pg_temp.chk(v_stored is null, 'the Event''s stored schedule link is removed');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 21. event_search and observation_search: a filter ID of a deleted Record matches nothing (M-0021 D10)
+do $t$
+declare t constant text := 'event_and_observation_search_filter_by_deleted_record_id_matches_nothing';
+  subj jsonb; sc jsonb; ev jsonb; ev2 jsonb; ob jsonb; r jsonb;
+begin
+  subj := lifeos.subject_create('{"name":"D10 person","subject_type":"person"}');
+  sc := lifeos.schedule_create('{"title":"D10xq planned","planned_date":"2032-05-01"}');
+  ev2 := lifeos.event_create(jsonb_build_object('schedule_id', sc->>'id', 'occurred_date', '2032-05-01'));
+  ev := lifeos.event_create('{"title":"D10xq event","occurred_date":"2032-05-01"}');
+  ob := lifeos.observation_create(jsonb_build_object('subject_id', subj->>'id','observation_name','d10metric','value_numeric',1,'observed_date','2032-05-01','event_id', ev->>'id'));
+  -- active targets match
+  perform pg_temp.chk((lifeos.event_search(jsonb_build_object('schedule_id', sc->>'id'))->>'returned_count')::int = 1, 'schedule_id of an active Schedule matches its Event');
+  perform pg_temp.chk((lifeos.observation_search(jsonb_build_object('subject_id', subj->>'id'))->>'returned_count')::int = 1, 'subject_id of an active Subject matches');
+  perform pg_temp.chk((lifeos.observation_search(jsonb_build_object('event_id', ev->>'id'))->>'returned_count')::int = 1, 'event_id of an active Event matches');
+  -- deleted targets match nothing, without an error
+  perform lifeos.schedule_delete((sc->>'id')::uuid);
+  perform pg_temp.chk((lifeos.event_search(jsonb_build_object('schedule_id', sc->>'id'))->>'returned_count')::int = 0, 'schedule_id of a deleted Schedule matches nothing');
+  perform pg_temp.chk((lifeos.event_search(jsonb_build_object('schedule_id', sc->>'id', 'include_deleted', true))->>'returned_count')::int = 0, 'also with include_deleted');
+  r := lifeos.event_search('{"keyword":"D10xq","from_date":"2032-05-01","to_date":"2032-05-01"}');
+  perform pg_temp.chk((r->>'returned_count')::int = 2 and exists (select 1 from jsonb_array_elements(r->'results') x where x->>'id' = ev2->>'id'), 'the Event stays findable by keyword and dates');
+  perform lifeos.subject_delete((subj->>'id')::uuid);
+  perform pg_temp.chk((lifeos.observation_search(jsonb_build_object('subject_id', subj->>'id'))->>'returned_count')::int = 0, 'subject_id of a deleted Subject matches nothing');
+  perform lifeos.event_delete((ev->>'id')::uuid);
+  perform pg_temp.chk((lifeos.observation_search(jsonb_build_object('event_id', ev->>'id'))->>'returned_count')::int = 0, 'event_id of a deleted Event matches nothing');
+  r := lifeos.observation_search('{"observation_name":"d10metric","from_date":"2032-05-01","to_date":"2032-05-01"}');
+  perform pg_temp.chk((r->>'returned_count')::int = 1 and r->'results'->0->>'id' = ob->>'id', 'the Observation stays findable by name and dates');
+  perform pg_temp.chk((lifeos.observation_search(jsonb_build_object('subject_id', gen_random_uuid()))->>'returned_count')::int = 0, 'an unknown ID matches nothing');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

@@ -18,6 +18,8 @@
 --   13. reading_remark_delete_keeps_reading_updated_at_and_analyses
 --   14. reading_story_persons_set_leaves_reading_updated_at_unchanged
 --   15. reading_remark_update_replaces_whole_entry
+--   16. storyline_end_date_never_before_start_date
+--   17. divination_and_story_person_search_filter_by_deleted_record_id_matches_nothing
 --
 -- Test setup that the Contract has no function for: tests 12, 13, 14 and 15 each move updated_at
 -- of one Reading 5 days back, so a change of updated_at shows inside one transaction.
@@ -541,6 +543,68 @@ begin
   perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(gen_random_uuid(), jsonb_build_object('entry_id', %L::uuid, 'text', 'x'))$$, e1->>'entry_id'), 'record not found');
   perform lifeos.reading_delete(rid);
   perform pg_temp.expect_err(format($$select lifeos.reading_remark_update(%L::uuid, jsonb_build_object('entry_id', %L::uuid, 'text', 'x'))$$, rid, e1->>'entry_id'), 'record deleted');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 16. A Storyline end date is never before its start date (M-0021 D8) --------------------------------
+do $t$
+declare t constant text := 'storyline_end_date_never_before_start_date';
+  sl jsonb; u jsonb; r jsonb;
+begin
+  perform pg_temp.expect_err($$select lifeos.storyline_create('{"content":"D8 bad","occurrence_date":"2033-05-10","occurrence_end_date":"2033-05-09"}')$$, 'invalid input');
+  perform pg_temp.chk(lifeos.storyline_create('{"content":"D8 same day","occurrence_date":"2033-05-10","occurrence_end_date":"2033-05-10"}')->>'occurrence_end_date' = '2033-05-10', 'the same day is allowed');
+  perform pg_temp.chk(lifeos.storyline_create('{"content":"D8 end only","occurrence_end_date":"2033-05-01"}')->>'occurrence_date' is null, 'an end date without a start date is allowed');
+  sl := lifeos.storyline_create('{"content":"D8 storyline","occurrence_date":"2033-05-10","occurrence_end_date":"2033-05-12"}');
+  -- storyline_update checks the dates after the change
+  perform pg_temp.expect_err(format($$select lifeos.storyline_update(%L::uuid, '{"occurrence_date":"2033-05-13"}')$$, sl->>'id'), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.storyline_update(%L::uuid, '{"occurrence_end_date":"2033-05-09"}')$$, sl->>'id'), 'invalid input');
+  perform pg_temp.expect_err(format($$select lifeos.storyline_update(%L::uuid, '{"occurrence_date":"2033-05-20","occurrence_end_date":"2033-05-19","content":"x"}')$$, sl->>'id'), 'invalid input');
+  r := lifeos.storyline_read((sl->>'id')::uuid);
+  perform pg_temp.chk(r->>'occurrence_date' = '2033-05-10' and r->>'occurrence_end_date' = '2033-05-12' and r->>'content' = 'D8 storyline', 'a rejected update changes nothing');
+  u := lifeos.storyline_update((sl->>'id')::uuid, '{"occurrence_date":"2033-05-13","occurrence_end_date":"2033-05-13"}');
+  perform pg_temp.chk(u->>'occurrence_date' = '2033-05-13' and u->>'occurrence_end_date' = '2033-05-13', 'moving both dates to the same day is allowed');
+  u := lifeos.storyline_update((sl->>'id')::uuid, '{"occurrence_end_date":"2033-05-13"}');
+  perform pg_temp.chk(u->>'occurrence_end_date' = '2033-05-13', 'an end date equal to the stored start date is allowed');
+  u := lifeos.storyline_update((sl->>'id')::uuid, '{"occurrence_date":null,"occurrence_end_date":"2033-05-01"}');
+  perform pg_temp.chk(u->>'occurrence_date' is null and u->>'occurrence_end_date' = '2033-05-01', 'a cleared start date leaves no rule to break');
+  u := lifeos.storyline_update((sl->>'id')::uuid, '{"title":"D8 title"}');
+  perform pg_temp.chk(u->>'title' = 'D8 title', 'an update of other fields works as before');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 17. divination_search and story_person_search: a filter ID of a deleted Record matches nothing (M-0021 D10)
+do $t$
+declare t constant text := 'divination_and_story_person_search_filter_by_deleted_record_id_matches_nothing';
+  s1 uuid := ((lifeos.subject_create('{"name":"D10 linked subject"}'))->>'id')::uuid;
+  s2 uuid := ((lifeos.subject_create('{"name":"D10 story subject"}'))->>'id')::uuid;
+  sp uuid; sp_only uuid; d jsonb; rid text; res jsonb;
+begin
+  sp := pg_temp.mk_sp('D10 story person', s2);
+  sp_only := pg_temp.mk_sp('D10 lone story person');
+  d := lifeos.divination_record_save(jsonb_build_object('session_date','2033-06-01','readings', jsonb_build_array(jsonb_build_object('question','D10xq Q','method','tarot','result_text','R',
+         'reading_date','2033-06-01','story_person_ids', jsonb_build_array(sp, sp_only)))));
+  rid := d->'readings'->0->>'id';
+  perform lifeos.record_link_create(jsonb_build_object('from_type','reading','from_id', rid,'to_type','subject','to_id', s1));
+  -- active targets match
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('subject_id', s1))->>'returned_count')::int = 1, 'subject_id through a Record link matches');
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('subject_id', s2))->>'returned_count')::int = 1, 'subject_id through a Story Person matches');
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('story_person_id', sp_only))->>'returned_count')::int = 1, 'story_person_id of an active Story Person matches');
+  perform pg_temp.chk((lifeos.story_person_search(jsonb_build_object('subject_id', s2))->>'returned_count')::int = 1, 'story_person_search subject_id of an active Subject matches');
+  -- deleted targets match nothing, without an error
+  perform lifeos.subject_delete(s1);
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('subject_id', s1))->>'returned_count')::int = 0, 'subject_id of a deleted Subject matches nothing through a Record link');
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('subject_id', s1, 'include_deleted', true))->>'returned_count')::int = 0, 'also with include_deleted');
+  perform lifeos.subject_delete(s2);
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('subject_id', s2))->>'returned_count')::int = 0, 'subject_id of a deleted Subject matches nothing through a Story Person');
+  perform pg_temp.chk((lifeos.story_person_search(jsonb_build_object('subject_id', s2))->>'returned_count')::int = 0, 'story_person_search subject_id of a deleted Subject matches nothing');
+  perform pg_temp.chk((lifeos.story_person_search('{"keyword":"D10 story person"}')->>'returned_count')::int = 1, 'the Story Person stays findable by keyword');
+  perform lifeos.story_person_delete(sp_only);
+  perform pg_temp.chk((lifeos.divination_search(jsonb_build_object('story_person_id', sp_only))->>'returned_count')::int = 0, 'story_person_id of a deleted Story Person matches nothing');
+  -- other filters work as before
+  res := lifeos.divination_search('{"keyword":"D10xq","from_date":"2033-06-01","to_date":"2033-06-01","method":"tarot"}');
+  perform pg_temp.chk((res->>'returned_count')::int = 1 and res->'results'->0->>'id' = d->>'id', 'the Divination Record stays findable by keyword, dates and method');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

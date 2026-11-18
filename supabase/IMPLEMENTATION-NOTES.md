@@ -32,3 +32,9 @@ An AI Agent reads this file before it writes or changes a migration in `supabase
 14. A fix to an applied build is a new migration file. It uses `create or replace function` with the same signature.
 15. The tests in `tests/` run after all migrations. Each test file ends with a rollback and leaves no data.
 16. A migration that creates a new function revokes `EXECUTE` on it from `PUBLIC`, `anon` and `authenticated`. It then grants `EXECUTE` to `anon` and `authenticated` only when the function is a Contract function. `create or replace function` on an existing function keeps its grants.
+
+## 6. Links and search filters
+
+17. `_links` builds every `links` list and the Timeline `subjects`. It returns each Subject once, keyed by Subject `id`. Its fixed `via` order follows Contract 1.5 item 15.
+18. Every search filter by a reference ID also checks that the target Record is active. This holds with `include_deleted = true` too. A new search function follows this rule.
+19. `record_link_create` is the only function that inserts into `record_links`. It holds every rejected pair. A new function that inserts a Record link applies the same checks.

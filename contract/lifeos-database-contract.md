@@ -77,12 +77,14 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
 
 7. **Edit history.** An edit changes the Record directly and keeps only its latest content. Expense is the only Record Type with correction history (Chapter 6).
 
-8. **Deletion.** Every `_delete` function is a soft delete. It sets `deleted_at` and returns `{ "id": uuid, "deleted_at": timestamp }`. Deleting an already deleted Record returns its existing `deleted_at`. No restore function exists.
+8. **Deletion.** Every `_delete` function is a soft delete. It sets `deleted_at` and returns `{ "id": uuid, "deleted_at": timestamp }`. Deleting an already deleted Record returns its existing `deleted_at`. No restore function exists. 4.2.6 and 6.7 add fields to this return.
 
 9. **Links to deleted Records.** Other Records keep their stored links to a deleted Record. Every read, search and Timeline result ignores them:
    - Lists of linked Records omit deleted targets.
    - A scalar reference field, such as `schedule_id`, is returned as `null` when its target is deleted. The stored value stays.
    - The only adjusted link is the Event–Schedule link (4.2.6).
+   - In every search function, a `p_filter` ID of a deleted Record matches nothing through these links. The filter returns no error. This also holds with `include_deleted = true`.
+   - The Records that link to a deleted Record stay findable by other filters, such as dates.
 
 10. **Remarks.** `remarks` is a JSON array of `{ "remark_id": uuid, "timestamp": "<UTC ISO 8601>", "text": "<trimmed text>" }`.
     - The function assigns a new `remark_id` to every stored Remark. Input never supplies it.
@@ -96,11 +98,16 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
 12. **Transactions.** Each function call runs in one transaction. A batch either saves fully or saves nothing.
 
 13. **Errors.** Database constraints may return native PostgreSQL errors. Function validation returns errors such as "record not found", "record deleted", "invalid input", "invalid date", "unsupported field" and "invalid relationship".
+    - An error may carry a PostgreSQL `detail` text that names the cause, such as 5.8.
 
 14. **Referenced Records.** A supplied reference ID, such as a Subject, Story Person, Schedule, Event or Profile ID, names an active Record. A function may state another rule, such as 9.2 item 4.
     - An unknown ID returns "record not found".
     - An ID of a deleted Record returns "record deleted".
-    - An ID in `p_filter` only narrows the results. An unknown or deleted ID in `p_filter` returns no error.
+    - An ID in `p_filter` only narrows the results. An unknown ID in `p_filter` returns no error. A deleted ID follows item 9.
+
+15. **Connected Subjects.** Every return that lists the Subjects connected to a Record lists each Subject once, keyed by Subject `id`.
+    - This covers `links` (4.5.3) and the Timeline `subjects` (9.1), in every read, search and Timeline result.
+    - Several paths may lead to one Subject. `via` then names the first path in this order: `record_link`, `observation_subject`, `payment_method`, `merchant`, `line_item`, `story_person_subject`, `person_profile_subject`.
 
 ## 1.6 Access
 
@@ -598,10 +605,13 @@ Derived field on every Event return: `observations`, the active Observations who
 
 **Behavior:**
 1. The function sets `deleted_at` on the Event.
-2. When the Event has `schedule_id`, the function clears `schedule_id` and sets that Schedule's `status` to `planned`.
-3. Every other link to the Event stays stored and is ignored (1.5 item 9). This includes Observations with this `event_id` and Notes linked through 4.5.
+2. When the Event has `schedule_id`, the function clears `schedule_id`. This removes the link to an active or a deleted Schedule.
+3. An active linked Schedule returns to `status = "planned"`. A deleted linked Schedule keeps its `status`.
+4. Every other link to the Event stays stored and is ignored (1.5 item 9). This includes Observations with this `event_id` and Notes linked through 4.5.
 
 **Returns:** `{ "id": uuid, "deleted_at": timestamp, "schedule_returned_to_planned": uuid or null }`.
+- `schedule_returned_to_planned` is the ID of the Schedule that returned to Planned.
+- It is `null` when the Event had no Schedule link or its Schedule is deleted.
 
 ## 4.3 Observation
 
@@ -804,6 +814,8 @@ Typed reference fields hold the structured links: `event.schedule_id`, `observat
 
 Record link fields: `id`, `record_type_a`, `record_id_a`, `record_type_b`, `record_id_b`, `created_at`. A link has no direction. A pair of Records has at most one link.
 
+A `divination_record` or a `reading` never links to a `storyline`, in either direction. Every function that would create such a link returns "invalid relationship". A relation between them goes in a Reading Remark entry (7.3).
+
 ### 4.5.1 record_link_create
 
 **Signature:** `record_link_create(p_input jsonb)`
@@ -818,7 +830,7 @@ Record link fields: `id`, `record_type_a`, `record_id_a`, `record_type_b`, `reco
 
 **Behavior:**
 1. Both types are Record Type names (1.5 item 2). Both Records exist and are active.
-2. A Record cannot link to itself. A Subject cannot link to another Subject. A `reading` and a `storyline` cannot link to each other. Each case returns "invalid relationship".
+2. A Record cannot link to itself. A Subject cannot link to another Subject. A Divination Record or a Reading cannot link to a Storyline (4.5). Each case returns "invalid relationship".
 3. An existing link for the same pair is returned unchanged.
 4. The Agent makes the call only after the link is clear or confirmed by the user.
 
@@ -851,7 +863,7 @@ Record link fields: `id`, `record_type_a`, `record_id_a`, `record_type_b`, `reco
 2. It also returns the typed reference fields that point to or from the Record. The `via` value names each one.
 3. Deleted targets are omitted (1.5 item 9).
 4. A deleted Record returns its links to active targets, as an exact read does (1.5 item 3).
-5. A Subject appears once in a Reading's links. When a Record link and a Story Person both lead to it, its `via` is `record_link`.
+5. Each connected Subject appears once (1.5 item 15).
 
 **Returns:** `{ "record_type": text, "id": uuid, "links": [ { "via": text, "record_type": text, "id": uuid, "summary": text, "occurrence_date": date or null } ] }`.
 - `via` is `record_link`, `schedule`, `event`, `observation_subject`, `observation_event`, `payment_method`, `merchant`, `line_item`, `refund_of`, `story_person_subject` or `person_profile_subject`.
@@ -1063,7 +1075,14 @@ Derived fields: `person_profile_id` (8.1) and `story_person_ids` (7.4). Only `su
 
 **Defaults:** None.
 
-**Behavior:** Follows 1.5 items 8 and 9. References to the Subject stay stored and are ignored.
+**Behavior:**
+1. Follows 1.5 items 8 and 9. References to the Subject stay stored and are ignored.
+2. When an active Person Profile has this Subject as `person_subject_id`, the function returns "invalid relationship". Its detail is "the Person Subject still has a Profile". The Subject stays active.
+3. A Subject without an active Person Profile is deleted under item 1.
+4. Before deleting a Person Subject with a Profile, the Agent asks the user how to handle the Profile:
+   - When the Profile belongs to another person, the Agent links it to the correct Subject with 8.1.4.
+   - When the user no longer wants the Profile, the Agent deletes it with 8.1.5.
+   - The Agent then deletes the Subject.
 
 **Returns:** `{ "id": uuid, "deleted_at": timestamp }`.
 
@@ -1224,7 +1243,6 @@ Line validation:
    - The `expense_total` after the correction is at least the sum of the amounts of its active Refunds. The check also applies to a correction that supplies `lines`.
    - The `transaction_date` after the correction is on or before the `transaction_date` of every active Refund.
 10. A violation of item 8 or 9 returns "invalid input". The function rejects the whole correction and saves no history version.
-11. A Refund whose purchase is deleted has no limit from that purchase.
 
 **Returns:** The complete Expense Record after the correction.
 
@@ -1251,9 +1269,16 @@ Line validation:
 **Behavior:**
 1. An empty `p_text` returns "invalid input". Before the deletion, the function saves a snapshot of the current Expense and its Lines as one history version. `p_text` is stored as the `correction_reason` of the version that the deletion produces (6.6).
 2. It then follows 1.5 items 8 and 9. Deleting an already deleted Expense saves no history version. It returns the existing `deleted_at`.
-3. Refunds of a deleted original stay. Their `refund_of` is returned as `null`. Each Refund counts by its own amount and date (6.9 item 2). Its corrections have no limit from the deleted original (6.5 item 11).
+3. Deleting a purchase also soft-deletes each of its active Refunds in the same transaction. Each Refund gets the `deleted_at` of the purchase.
+4. Each such Refund gets its own history snapshot. `p_text` is the `correction_reason` of that version too.
+5. Deleting a Refund deletes only that Refund.
+6. Before deleting a purchase with active Refunds, the Agent asks the user about each Refund in its `refunds` field:
+   - The Agent asks whether the Refund money was really received.
+   - The Agent states that deleting the purchase also deletes the Refund.
+   - The Agent calls the function after the user confirms.
 
-**Returns:** `{ "id": uuid, "deleted_at": timestamp }`.
+**Returns:** `{ "id": uuid, "deleted_at": timestamp, "deleted_refund_ids": [uuid] }`.
+- `deleted_refund_ids` lists the Refunds this call deleted, in the order of the `refunds` field. It is `[]` when the call deleted no Refund.
 
 ## 6.8 expense_refund_create
 
@@ -1300,15 +1325,15 @@ Line validation:
 
 **Behavior:**
 1. The report uses active Expenses whose `transaction_date` is in the period.
-2. A purchase counts in the period of its `transaction_date`. A Refund counts as its negative total in the period the money came back. A Refund whose original Expense is deleted counts the same way, by its own `expense_total` and `transaction_date`.
+2. A purchase counts in the period of its `transaction_date`. A Refund counts as its negative total in the period the money came back.
 3. Part 1, `total_spent`: the sum of `expense_total` over purchases and Refunds.
 4. Part 2, `by_payment_method`: the same sum per `payment_method_subject_id`, with the Subject name. Ordered by total descending.
 5. Part 3, `by_category`: the sum of `line_total` per `category` over purchase Lines. Refund Lines and Adjustment Lines are excluded. Ordered by total descending.
 6. Part 4, `by_tag`: the sum of `line_total` per Tag over purchase Lines. A Line with several Tags counts under each Tag. Refund Lines and Adjustment Lines are excluded. Ordered by total descending.
 7. Part 5, `adjustments`: the signed sum of purchase Lines with `line_type = "adjustment"`, and that sum per Merchant. Ordered with the most negative total first, so the first entry is the source that gave the most. Parts 3 and 4 leave out Adjustment Lines, so their totals may not add up to Part 1, `total_spent`. An Adjustment Line still stores its Category.
 8. The report also returns two Refund lists for the Agent's explanation:
-   - `refunds_in_period`: each Refund in the period with its original's `transaction_date` and total. When the original is deleted, `refund_of`, `original_transaction_date` and `original_total` are `null`.
-   - `later_refunds`: each active Refund after `to_date` whose active original is in the period.
+   - `refunds_in_period`: each Refund in the period with its original's `transaction_date` and total.
+   - `later_refunds`: each active Refund after `to_date` whose original is in the period.
 9. A repayment between Payment Methods is not an Expense and never appears in the report.
 
 **Returns:**
@@ -1486,7 +1511,7 @@ Analysis fields: `divination_record_id`, `reading_id` (`null` for a combined Ana
 **Behavior:**
 1. The supplied array replaces the Reading's Story Person set. Every value is an active Story Person (1.5 item 14). A repeated ID is stored once.
 2. The change touches only the association. It is not an edit. The Reading's `updated_at`, Question, Result and Analyses stay unchanged.
-3. A Reading has no structured link to a Storyline.
+3. A Reading has no structured link to a Storyline (4.5).
 
 **Returns:** The complete Reading.
 
@@ -1670,6 +1695,11 @@ Story Person fields: `name` (required), `gender`, `description` (identifying clu
 
 Storyline fields: `title`, `content` (required), `occurrence_date`, `occurrence_end_date`, `time_text` (period or relative order wording, such as "before the wedding"), `story_person_ids`, `metadata`. Recorded Time is `created_at` and is distinct from occurrence time.
 
+Storyline date rule:
+1. When both dates are present, `occurrence_end_date` is on or after `occurrence_date`. The same day is allowed.
+2. An `occurrence_end_date` before `occurrence_date` returns "invalid input".
+3. On this error, the Agent asks the user for the correct dates.
+
 ### 7.5.1 storyline_create
 
 **Signature:** `storyline_create(p_input jsonb)`
@@ -1685,7 +1715,7 @@ Storyline fields: `title`, `content` (required), `occurrence_date`, `occurrence_
 **Behavior:**
 1. Every `story_person_ids` value is an active Story Person (1.5 item 14).
 2. A Storyline that describes the same matter as a Personal Event links to it with 4.5.1.
-3. `occurrence_date` and `occurrence_end_date` are stored as supplied. The function does not compare them.
+3. The dates follow the Storyline date rule (7.5).
 
 **Returns:** The complete Storyline.
 
@@ -1730,7 +1760,9 @@ Storyline fields: `title`, `content` (required), `occurrence_date`, `occurrence_
 
 **Defaults:** None.
 
-**Behavior:** The Storyline keeps only its latest content, with no correction history.
+**Behavior:**
+1. The function checks the Storyline date rule (7.5) on the state after the change.
+2. The Storyline keeps only its latest content, with no correction history.
 
 **Returns:** The complete Storyline after the update.
 
@@ -2038,7 +2070,7 @@ Timeline is the data layer of the LifeOS Timeline function. The Agent layer deci
    - For a Reading, a Story Person whose `subject_id` is the Subject.
    - For a Communication Message, the Person Profile of the Subject.
 
-   For a Reading, a Subject reached by both a Record link and a Story Person appears once, with `via = record_link` (4.5.3 item 5).
+   Each Subject appears once (1.5 item 15).
 4. The function applies no further filter and no limit.
 5. With `date_basis = "occurrence"`, a Record is included when its occurrence date is in the period. With `date_basis = "record"`, it is included when its record date is in the period. Another `date_basis` value returns "invalid input". A `from_date` after `to_date` returns "invalid input".
 6. Schedules of every Status are included. An Occurred Schedule carries `linked_event_id`.

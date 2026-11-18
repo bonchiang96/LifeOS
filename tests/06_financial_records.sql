@@ -20,6 +20,8 @@
 --   15. expense_refund_create_rejects_amount_above_original_and_date_before_original
 --   16. expense_update_on_refund_keeps_amount_and_date_limits
 --   17. expense_update_on_purchase_keeps_total_and_date_limits_of_active_refunds
+--   18. expense_delete_on_purchase_also_deletes_its_active_refunds
+--   19. expense_search_filter_by_deleted_record_id_matches_nothing
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -314,7 +316,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- 8. Expense delete: reason required, snapshot kept, Refunds stay ---------------------
+-- 8. Expense delete: reason required, snapshot kept, its Refund goes with it (M-0021 D7) --
 do $t$
 declare t constant text := 'expense_delete_requires_reason_and_keeps_history';
   pm uuid := pg_temp.mk_subject('Card I', 'payment method'); o jsonb; r jsonb; d jsonb; d2 jsonb; h jsonb; id uuid;
@@ -336,11 +338,11 @@ begin
   d2 := lifeos.expense_delete(id, 'again');
   perform pg_temp.chk(d2->>'deleted_at' = d->>'deleted_at', 'a second delete returns the existing deleted_at');
   perform pg_temp.chk(lifeos.expense_read(id)->>'deleted_at' is not null, 'expense_read still returns the deleted Expense');
-  perform pg_temp.chk((lifeos.expense_search('{"keyword":"DeleteMeShopxq"}')->>'returned_count')::int = 1, 'search hides the deleted Expense (only its Refund remains)');
-  perform pg_temp.chk((lifeos.expense_search('{"keyword":"DeleteMeShopxq","include_deleted":true}')->>'returned_count')::int = 2, 'include_deleted shows it');
-  -- the Refund stays and reports refund_of as null
+  perform pg_temp.chk((lifeos.expense_search('{"keyword":"DeleteMeShopxq"}')->>'returned_count')::int = 0, 'search hides the deleted Expense and its deleted Refund');
+  perform pg_temp.chk((lifeos.expense_search('{"keyword":"DeleteMeShopxq","include_deleted":true}')->>'returned_count')::int = 2, 'include_deleted shows both');
+  -- M-0021 D7: the Refund is deleted with its purchase and reports refund_of as null
   r := lifeos.expense_read((r->>'id')::uuid);
-  perform pg_temp.chk(r->>'deleted_at' is null and r->>'refund_of' is null, 'the Refund stays active and refund_of reads null');
+  perform pg_temp.chk(r->>'deleted_at' = d->>'deleted_at' and r->>'refund_of' is null, 'the Refund is deleted with the purchase and refund_of reads null');
   perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"branch":"x","correction_reason":"x"}')$$, id), 'record deleted');
   perform pg_temp.expect_err(format($$select lifeos.expense_refund_create(%L::jsonb)$$, jsonb_build_object('refund_of', id,'refund_amount',1,'transaction_date','2032-09-04','line_type','item')), 'record deleted');
   perform pg_temp.pass(t);
@@ -619,13 +621,12 @@ begin
   u := lifeos.expense_update((r1->>'id')::uuid, '{"refund_amount":100,"correction_reason":"Full refund"}');
   perform pg_temp.chk((u->>'expense_total')::numeric = -100, 'a deleted Refund leaves room for the correction');
   perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"refund_amount":100.01,"correction_reason":"x"}')$$, r1->>'id'), 'invalid input');
-  -- a Refund of a deleted purchase keeps no limit
+  -- M-0021 D7 supersedes M-0020 D7 item 7: a Refund of a deleted purchase is deleted too, so no correction remains
   o2 := lifeos.expense_create(jsonb_build_object('transaction_date','2032-12-20','merchant_name','RefundFixShop2','payment_method_subject_id', pm,'expense_total', 50,'currency','MYR',
         'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',50,'line_total',50,'category','clothing'))));
   r3 := lifeos.expense_refund_create(jsonb_build_object('refund_of', o2->>'id','refund_amount',20,'transaction_date','2032-12-22','line_type','item'));
   perform lifeos.expense_delete((o2->>'id')::uuid, 'wrong receipt');
-  u := lifeos.expense_update((r3->>'id')::uuid, '{"refund_amount":80,"transaction_date":"2032-12-01","correction_reason":"Purchase was deleted"}');
-  perform pg_temp.chk((u->>'expense_total')::numeric = -80 and u->>'transaction_date' = '2032-12-01', 'a Refund of a deleted purchase counts by its own amount and date');
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"refund_amount":80,"transaction_date":"2032-12-01","correction_reason":"Purchase was deleted"}')$$, r3->>'id'), 'record deleted');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
@@ -663,6 +664,83 @@ begin
   perform pg_temp.chk((u->>'expense_total')::numeric = 30 and u->>'transaction_date' = '2033-01-15', 'a deleted Refund leaves room for the purchase correction');
   perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"expense_total":29.99,"correction_reason":"x"}')$$, id), 'invalid input');
   perform pg_temp.expect_err(format($$select lifeos.expense_update(%L::uuid, '{"transaction_date":"2033-01-16","correction_reason":"x"}')$$, id), 'invalid input');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 18. Deleting a purchase also deletes its active Refunds (M-0021 D7) ---------------------------------
+do $t$
+declare t constant text := 'expense_delete_on_purchase_also_deletes_its_active_refunds';
+  pm uuid := pg_temp.mk_subject('Card D7', 'payment method'); o jsonb; o2 jsonb; r0 jsonb; r1 jsonb; r2 jsonb; d jsonb; d0 jsonb; d2 jsonb; d3 jsonb; h jsonb; base jsonb;
+begin
+  o := lifeos.expense_create(jsonb_build_object('transaction_date','2033-02-01','merchant_name','D7Shop','payment_method_subject_id', pm,'expense_total', 100,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',100,'line_total',100,'category','clothing'))));
+  base := jsonb_build_object('refund_of', o->>'id','line_type','item');
+  r0 := lifeos.expense_refund_create(base || '{"refund_amount":10,"transaction_date":"2033-02-02"}');
+  r1 := lifeos.expense_refund_create(base || '{"refund_amount":20,"transaction_date":"2033-02-03"}');
+  r2 := lifeos.expense_refund_create(base || '{"refund_amount":30,"transaction_date":"2033-02-05"}');
+  -- deleting a Refund alone deletes only that Refund
+  d0 := lifeos.expense_delete((r0->>'id')::uuid, 'entered twice');
+  perform pg_temp.chk(d0->'deleted_refund_ids' = '[]'::jsonb, 'a Refund delete returns deleted_refund_ids []');
+  perform pg_temp.chk(lifeos.expense_read((o->>'id')::uuid)->>'deleted_at' is null and lifeos.expense_read((r1->>'id')::uuid)->>'deleted_at' is null, 'the purchase and the other Refunds stay active');
+  -- deleting the purchase deletes its active Refunds in the same call
+  d := lifeos.expense_delete((o->>'id')::uuid, 'Wrong receipt');
+  perform pg_temp.chk(d->>'id' = o->>'id' and d->>'deleted_at' is not null, 'delete returns id and deleted_at');
+  perform pg_temp.chk(d->'deleted_refund_ids' = jsonb_build_array(r1->>'id', r2->>'id'), 'deleted_refund_ids lists the two active Refunds, got ' || coalesce(d->>'deleted_refund_ids', 'null'));
+  perform pg_temp.chk(lifeos.expense_read((r1->>'id')::uuid)->>'deleted_at' = d->>'deleted_at' and lifeos.expense_read((r2->>'id')::uuid)->>'deleted_at' = d->>'deleted_at', 'each Refund is deleted at the purchase deletion time');
+  h := lifeos.expense_history((r1->>'id')::uuid);
+  perform pg_temp.chk(jsonb_array_length(h->'history') = 2 and h->'history'->1->>'correction_reason' = 'Wrong receipt', 'each Refund gets its own history version with the same reason');
+  perform pg_temp.chk(h->'history'->0->'snapshot'->>'deleted_at' is null and (h->'history'->0->'snapshot'->>'expense_total')::numeric = -20, 'the Refund snapshot is the version before the deletion');
+  perform pg_temp.chk((select count(*) from jsonb_array_elements(lifeos.expense_history((r2->>'id')::uuid)->'history') v where v->>'correction_reason' = 'Wrong receipt') = 1, 'the second Refund has the reason too');
+  h := lifeos.expense_history((r0->>'id')::uuid);
+  perform pg_temp.chk(jsonb_array_length(h->'history') = 2 and not exists (select 1 from jsonb_array_elements(h->'history') v where v->>'correction_reason' = 'Wrong receipt'), 'an already deleted Refund gets no new version');
+  perform pg_temp.chk(lifeos.expense_read((r0->>'id')::uuid)->>'deleted_at' = d0->>'deleted_at', 'an already deleted Refund keeps its deleted_at');
+  perform pg_temp.chk(lifeos.expense_read((o->>'id')::uuid)->'refunds' = '[]'::jsonb, 'the purchase lists no active Refund');
+  -- a repeated delete deletes nothing more
+  d2 := lifeos.expense_delete((o->>'id')::uuid, 'again');
+  perform pg_temp.chk(d2->>'deleted_at' = d->>'deleted_at' and d2->'deleted_refund_ids' = '[]'::jsonb, 'a second delete returns the existing deleted_at and []');
+  -- a purchase without Refunds
+  o2 := lifeos.expense_create(jsonb_build_object('transaction_date','2033-02-07','merchant_name','D7Shop2','payment_method_subject_id', pm,'expense_total', 5,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',5,'line_total',5,'category','food'))));
+  d3 := lifeos.expense_delete((o2->>'id')::uuid, 'not mine');
+  perform pg_temp.chk(d3->'deleted_refund_ids' = '[]'::jsonb, 'a purchase without Refunds returns deleted_refund_ids []');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 19. expense_search: a filter ID of a deleted Record matches nothing (M-0021 D10) ------------------
+do $t$
+declare t constant text := 'expense_search_filter_by_deleted_record_id_matches_nothing';
+  pm uuid := pg_temp.mk_subject('Card D10', 'payment method'); pm2 uuid := pg_temp.mk_subject('Card D10 two', 'payment method');
+  mer uuid := pg_temp.mk_subject('D10 Merchant', 'brand'); item uuid := pg_temp.mk_subject('D10 Item', 'product');
+  x jsonb; o jsonb; r jsonb; res jsonb;
+begin
+  x := lifeos.expense_create(jsonb_build_object('transaction_date','2033-03-01','merchant_name','D10Shopxq','merchant_subject_id', mer,'payment_method_subject_id', pm,'expense_total', 12,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',12,'line_total',12,'category','food','item_subject_id', item))));
+  o := lifeos.expense_create(jsonb_build_object('transaction_date','2033-03-02','merchant_name','D10RefShopxq','payment_method_subject_id', pm2,'expense_total', 40,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',40,'line_total',40,'category','clothing'))));
+  r := lifeos.expense_refund_create(jsonb_build_object('refund_of', o->>'id','refund_amount',15,'transaction_date','2033-03-04','line_type','item'));
+  -- active targets match
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('payment_method_subject_id', pm))->>'returned_count')::int = 1, 'payment_method_subject_id of an active Subject matches');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('merchant_subject_id', mer))->>'returned_count')::int = 1, 'merchant_subject_id of an active Subject matches');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('item_subject_id', item))->>'returned_count')::int = 1, 'item_subject_id of an active Subject matches');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('refund_of', o->>'id'))->>'returned_count')::int = 1, 'refund_of of an active purchase matches');
+  -- deleted targets match nothing, without an error, also with include_deleted
+  perform lifeos.subject_delete(pm);
+  perform lifeos.subject_delete(mer);
+  perform lifeos.subject_delete(item);
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('payment_method_subject_id', pm))->>'returned_count')::int = 0, 'payment_method_subject_id of a deleted Subject matches nothing');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('merchant_subject_id', mer))->>'returned_count')::int = 0, 'merchant_subject_id of a deleted Subject matches nothing');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('item_subject_id', item))->>'returned_count')::int = 0, 'item_subject_id of a deleted Subject matches nothing');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('payment_method_subject_id', pm, 'include_deleted', true))->>'returned_count')::int = 0, 'also with include_deleted');
+  -- other filters work as before
+  res := lifeos.expense_search('{"keyword":"D10Shopxq","from_date":"2033-03-01","to_date":"2033-03-01"}');
+  perform pg_temp.chk((res->>'returned_count')::int = 1 and res->'results'->0->>'id' = x->>'id', 'the Expense stays findable by keyword and dates');
+  perform pg_temp.chk((lifeos.expense_search('{"keyword":"D10Shopxq","category":"food","currency":"myr"}')->>'returned_count')::int = 1, 'category and currency filters work as before');
+  perform lifeos.expense_delete((o->>'id')::uuid, 'wrong receipt');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('refund_of', o->>'id', 'include_deleted', true))->>'returned_count')::int = 0, 'refund_of of a deleted purchase matches nothing');
+  perform pg_temp.chk((lifeos.expense_search('{"keyword":"D10RefShopxq","include_deleted":true}')->>'returned_count')::int = 2, 'the deleted purchase and its Refund stay findable by keyword with include_deleted');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('payment_method_subject_id', pm2, 'include_deleted', true))->>'returned_count')::int = 2, 'the deleted Refund stays findable by an active Subject with include_deleted');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

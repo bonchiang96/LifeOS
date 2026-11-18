@@ -11,6 +11,7 @@
 --   6. subject_merge_rejections
 --   7. subject_update_read_and_delete
 --   8. subject_merge_rejects_empty_identity
+--   9. subject_delete_rejects_person_subject_with_active_profile
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
@@ -276,6 +277,38 @@ begin
   perform pg_temp.expect_err(format($$select lifeos.subject_merge(jsonb_build_object('keep_id', %L::uuid, 'merge_id', %L::uuid, 'identity', '{}'::jsonb))$$, a->>'id', b->>'id'), 'invalid input');
   perform pg_temp.chk(lifeos.subject_read((a->>'id')::uuid)->>'name' = 'Empty identity keep', 'the kept Subject is unchanged');
   perform pg_temp.chk(lifeos.subject_read((b->>'id')::uuid)->>'deleted_at' is null, 'the other Subject stays active');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 9. Delete: a Person Subject with an active Profile is rejected (M-0021 D4) ------------------------
+do $t$
+declare t constant text := 'subject_delete_rejects_person_subject_with_active_profile';
+  s jsonb; c jsonb; pf jsonb; d jsonb; d2 jsonb; v_msg text; v_det text;
+begin
+  s := lifeos.subject_create('{"name":"D4 person","subject_type":"person"}');
+  c := lifeos.subject_create('{"name":"D4 correct person","subject_type":"person"}');
+  pf := lifeos.communication_profile_create(jsonb_build_object('profile_key','d4-person','profile_type','person','name','D4','person_subject_id', s->>'id'));
+  begin
+    perform lifeos.subject_delete((s->>'id')::uuid);
+  exception when others then
+    get stacked diagnostics v_msg = message_text, v_det = pg_exception_detail;
+  end;
+  perform pg_temp.chk(v_msg = 'invalid relationship', 'the delete returns invalid relationship, got ' || coalesce(v_msg, '<no error>'));
+  perform pg_temp.chk(v_det = 'the Person Subject still has a Profile', 'the detail names the Profile, got ' || coalesce(v_det, 'null'));
+  perform pg_temp.chk(lifeos.subject_read((s->>'id')::uuid)->>'deleted_at' is null, 'the Subject stays active');
+  -- the Profile belongs to another person: link it to the correct Subject, then delete
+  perform lifeos.communication_profile_update((pf->>'id')::uuid, jsonb_build_object('person_subject_id', c->>'id'));
+  d := lifeos.subject_delete((s->>'id')::uuid);
+  perform pg_temp.chk(d->>'id' = s->>'id' and d->>'deleted_at' is not null, 'the Subject is deleted after its Profile moved');
+  d2 := lifeos.subject_delete((s->>'id')::uuid);
+  perform pg_temp.chk(d2->>'deleted_at' = d->>'deleted_at', 'a second delete returns the existing deleted_at');
+  -- the user no longer wants the Profile: delete it, then delete the Subject
+  perform pg_temp.expect_err(format($$select lifeos.subject_delete(%L::uuid)$$, c->>'id'), 'invalid relationship');
+  perform lifeos.communication_profile_delete((pf->>'id')::uuid);
+  d := lifeos.subject_delete((c->>'id')::uuid);
+  perform pg_temp.chk(d->>'deleted_at' is not null, 'a Subject whose Profile is deleted is deleted');
+  perform pg_temp.expect_err($$select lifeos.subject_delete(gen_random_uuid())$$, 'record not found');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
