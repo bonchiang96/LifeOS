@@ -16,6 +16,9 @@
 --    9. past_reading_short_view_first_full_view_on_request
 --   10. reading_remark_after_storyline_save_add_correct_and_remove
 --   11. reading_story_persons_changed_after_approval_not_an_edit
+--   12. meihua_round_saved_as_second_separate_analysis_at_save_time
+--   13. meihua_round_for_saved_reading_added_later_with_analysis_add
+--   14. end_signal_cutoff_saved_on_approval_silent_stop_saves_nothing
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- Fixture text starts with SKT_ and business dates lie in 2032, unless a flow needs today
@@ -192,21 +195,21 @@ declare t constant text := 'storybook_saved_on_approval';
   sp1 jsonb; sp2 jsonb; sp3 uuid; u jsonb; sl jsonb; sl2 jsonb; e jsonb; rd jsonb;
 begin
   sp3 := pg_temp.mk_sp('SKT_D4 Kevin from school');
-  -- approved: steps 4 and 5, with and without an approved Subject association
+  -- approved: steps 5 and 6, with and without an approved Subject association
   sp1 := lifeos.story_person_create(jsonb_build_object('name', 'SKT_D4 Jason', 'gender', 'male', 'description', 'SKT_D4 neighbour', 'subject_id', s));
   sp2 := lifeos.story_person_create('{"name": "SKT_D4 Jason''s wife", "gender": "female"}'::jsonb);
   perform pg_temp.chk(sp1 ->> 'subject_id' = s::text and sp2 ->> 'subject_id' is null, 'the Subject association only where approved');
-  -- step 6: an approved change, including a new Subject association
+  -- step 7: an approved change, including a new Subject association
   u := lifeos.story_person_update(sp3, jsonb_build_object('subject_id', s3, 'aliases', jsonb_build_array('SKT_D4 KV')));
   perform pg_temp.chk(u ->> 'subject_id' = s3::text and u -> 'aliases' = '["SKT_D4 KV"]'::jsonb, 'the existing Story Person is updated');
-  -- step 7
+  -- step 8
   sl := lifeos.storyline_create(jsonb_build_object('title', 'SKT_D4 housewarming', 'content', 'SKT_D4 Jason and his wife held a housewarming',
           'occurrence_date', '2032-03-05', 'story_person_ids', jsonb_build_array(sp1 ->> 'id', sp2 ->> 'id')));
   perform pg_temp.chk(jsonb_array_length(sl -> 'story_person_ids') = 2, 'the Storyline holds both Story Persons');
-  -- step 8: added details to the confirmed Storyline
+  -- step 9: added details to the confirmed Storyline
   sl2 := lifeos.storyline_update((sl ->> 'id')::uuid, jsonb_build_object('content', (sl ->> 'content') || '. SKT_D4 They announced a baby.'));
   perform pg_temp.chk(sl2 ->> 'content' like '%announced a baby.', 'details added, latest content kept');
-  -- step 10: the user's Personal Event of the same matter
+  -- step 11: the user's Personal Event of the same matter
   e := lifeos.event_create('{"title": "SKT_D4 went to Jason''s housewarming", "occurred_date": "2032-03-05"}'::jsonb);
   perform lifeos.record_link_create(jsonb_build_object('from_type', 'storyline', 'from_id', sl ->> 'id', 'to_type', 'event', 'to_id', e ->> 'id'));
   rd := lifeos.storyline_read((sl ->> 'id')::uuid);
@@ -309,7 +312,7 @@ begin
   d := pg_temp.mk_reading('SKT_D8 Will the renovation finish on time?', '2032-04-22');
   r0 := d -> 'readings' -> 0;
   c := lifeos.analysis_add(jsonb_build_object('divination_record_id', d ->> 'id', 'source', 'Claude', 'overall_outcome', 'SKT_D8 combined', 'key_reasoning', 'SKT_D8 r'));
-  -- step 5: the wrong Reading is deleted, then added again correctly
+  -- step 6: the wrong Reading is deleted, then added again correctly
   perform lifeos.reading_delete((r0 ->> 'id')::uuid);
   nr := lifeos.reading_create(jsonb_build_object('divination_record_id', d ->> 'id', 'question', 'SKT_D8 Will the renovation finish on time?', 'method', 'tarot',
           'result_text', E'1. 关键：The Tower (upright)\n2. 重点：Eight of Pentacles (upright)\n3. 前方：Four of Wands (upright)', 'reading_date', '2032-04-22',
@@ -317,16 +320,16 @@ begin
   full_rec := lifeos.divination_record_read((d ->> 'id')::uuid);
   perform pg_temp.chk(jsonb_array_length(full_rec -> 'readings') = 1 and full_rec -> 'readings' -> 0 ->> 'id' = nr ->> 'id', 'only the corrected Reading is active');
   perform pg_temp.chk(pg_temp.cnt(full_rec -> 'record_analyses', (c ->> 'id')::uuid) = 1, 'the combined Analysis stays');
-  -- step 6: the wrong Analysis is deleted, then added again
+  -- step 7: the wrong Analysis is deleted, then added again
   perform lifeos.analysis_delete((nr -> 'analyses' -> 0 ->> 'id')::uuid);
   na := lifeos.analysis_add(jsonb_build_object('reading_id', nr ->> 'id', 'source', 'Claude', 'overall_outcome', 'SKT_D8 delays, then celebration', 'key_reasoning', 'SKT_D8 the Tower, then Four of Wands'));
   full_rec := lifeos.divination_record_read((d ->> 'id')::uuid);
   perform pg_temp.chk(jsonb_array_length(full_rec -> 'readings' -> 0 -> 'analyses') = 1 and full_rec -> 'readings' -> 0 -> 'analyses' -> 0 ->> 'id' = na ->> 'id', 'only the corrected Analysis is active');
-  -- step 8: descriptive fields only
+  -- step 9: descriptive fields only
   u := lifeos.divination_record_update((d ->> 'id')::uuid, '{"title": "SKT_D8 renovation", "topic": "home"}'::jsonb);
   perform pg_temp.chk(u ->> 'title' = 'SKT_D8 renovation' and u ->> 'topic' = 'home', 'title and topic changed');
   perform pg_temp.expect_err(format($$select lifeos.divination_record_update(%s, '{"question": "edited"}'::jsonb)$$, pg_temp.q((d ->> 'id')::uuid)), 'unsupported field');
-  -- step 7: the whole session
+  -- step 8: the whole session
   del := lifeos.divination_record_delete((d ->> 'id')::uuid);
   full_rec := lifeos.divination_record_read((d ->> 'id')::uuid);
   perform pg_temp.chk(full_rec ->> 'deleted_at' = del ->> 'deleted_at' and full_rec -> 'readings' -> 0 ->> 'deleted_at' = del ->> 'deleted_at', 'the session and its Readings share the deletion time');
@@ -414,6 +417,96 @@ begin
                       and pg_temp.cnt(lifeos.divination_search(jsonb_build_object('story_person_id', sp1)) -> 'results', (d ->> 'id')::uuid) = 0, 'retrieval follows the new Story Person');
   perform pg_temp.chk(pg_temp.cnt(lifeos.subject_records(s2, '{"record_types": ["reading"]}'::jsonb) -> 'results', (r0 ->> 'id')::uuid) = 1
                       and pg_temp.cnt(lifeos.subject_records(s1, '{"record_types": ["reading"]}'::jsonb) -> 'results', (r0 ->> 'id')::uuid) = 0, 'the Reading''s Subject follows its Story Persons');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 12. Section 10 steps 16 to 20, then Section 11 step 5: the 梅花易数 round is a second, separate Analysis ---------
+do $t$
+declare t constant text := 'meihua_round_saved_as_second_separate_analysis_at_save_time';
+  iching text := E'本卦：火天大有\n动爻：九四\n变卦：山天大畜'; d jsonb; r jsonb; full_rec jsonb; fr jsonb;
+begin
+  -- Section 10 steps 1 to 15: the standard I Ching interpretation; steps 16 to 20: the user chooses the 梅花易数 round (Agent steps)
+  -- Section 11 step 2: the user approves the save (Agent step); steps 3 to 10: one call with two Analyses in the Reading
+  d := lifeos.divination_record_save(jsonb_build_object('session_date', '2032-07-03', 'title', 'SKT_D12 shop lease',
+         'readings', jsonb_build_array(jsonb_build_object('question', 'SKT_D12 If I renew the shop lease, how will the business develop this year?',
+           'method', 'i_ching', 'result_text', iching,
+           'analyses', jsonb_build_array(
+             jsonb_build_object('source', 'Claude', 'overall_outcome', 'SKT_D12 standard: steady growth with care in the fourth month',
+               'key_reasoning', 'SKT_D12 大有 with 九四 asks for restraint'),
+             jsonb_build_object('source', 'Claude', 'overall_outcome', 'SKT_D12 梅花易数: timing favours the second half of the year',
+               'key_reasoning', 'SKT_D12 体用 and 应期 from the trigrams'))))));
+  -- one Reading: the 梅花易数 round is no new Reading and no combined Analysis
+  perform pg_temp.chk(jsonb_array_length(d -> 'readings') = 1 and d -> 'record_analyses' = '[]'::jsonb, 'one Reading, no combined Analysis');
+  r := d -> 'readings' -> 0;
+  perform pg_temp.chk(r ->> 'result_text' = iching, 'the Result text is kept whole');
+  perform pg_temp.chk(jsonb_array_length(r -> 'analyses') = 2 and r -> 'analyses' -> 0 ->> 'id' <> r -> 'analyses' -> 1 ->> 'id', 'two separate Analyses');
+  perform pg_temp.chk((select bool_and(a ->> 'reading_id' = r ->> 'id') from jsonb_array_elements(r -> 'analyses') a), 'both Analyses belong to the same Reading');
+  -- read back: both rounds stay distinct
+  full_rec := lifeos.divination_record_read((d ->> 'id')::uuid);
+  fr := pg_temp.find(full_rec -> 'readings', (r ->> 'id')::uuid);
+  perform pg_temp.chk(jsonb_array_length(fr -> 'analyses') = 2
+                      and exists (select 1 from jsonb_array_elements(fr -> 'analyses') a where a ->> 'overall_outcome' like 'SKT_D12 standard:%')
+                      and exists (select 1 from jsonb_array_elements(fr -> 'analyses') a where a ->> 'overall_outcome' like 'SKT_D12 梅花易数:%'), 'the standard and the 梅花易数 Analysis are stored apart');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 13. Section 12 step 5: a 梅花易数 round for an already saved Reading is added later with analysis_add -------------
+do $t$
+declare t constant text := 'meihua_round_for_saved_reading_added_later_with_analysis_add';
+  d jsonb; r0 jsonb; a0 jsonb; s jsonb; a jsonb; full_rec jsonb; fr jsonb; old_a jsonb; it jsonb;
+begin
+  d := lifeos.divination_record_save(jsonb_build_object('session_date', '2032-07-10', 'title', 'SKT_D13 new job',
+         'readings', jsonb_build_array(jsonb_build_object('question', 'SKT_D13 If I take the new job, how will my work develop?', 'method', 'i_ching',
+           'result_text', E'本卦：地风升\n静爻',
+           'analyses', jsonb_build_array(jsonb_build_object('source', 'Claude', 'overall_outcome', 'SKT_D13 standard: gradual rise', 'key_reasoning', 'SKT_D13 升 is growth step by step'))))));
+  r0 := d -> 'readings' -> 0; a0 := r0 -> 'analyses' -> 0;
+  -- step 1: find the Reading (Section 13)
+  s := lifeos.divination_search('{"keyword": "SKT_D13 new job"}'::jsonb);
+  perform pg_temp.chk(pg_temp.cnt(s -> 'results', (d ->> 'id')::uuid) = 1, 'the saved session is found');
+  -- step 5: the later 梅花易数 round is a second, separate Analysis with that reading_id
+  a := lifeos.analysis_add(jsonb_build_object('reading_id', r0 ->> 'id', 'source', 'Claude', 'overall_outcome', 'SKT_D13 梅花易数: the change comes after three months',
+         'key_reasoning', 'SKT_D13 体用 and 应期', 'analysis_date', '2032-07-12'));
+  perform pg_temp.chk(a ->> 'reading_id' = r0 ->> 'id' and a ->> 'divination_record_id' = d ->> 'id' and a ->> 'id' <> a0 ->> 'id', 'a new Analysis of the same Reading');
+  -- outcome: the Reading and the standard Analysis stay unchanged
+  full_rec := lifeos.divination_record_read((d ->> 'id')::uuid);
+  fr := pg_temp.find(full_rec -> 'readings', (r0 ->> 'id')::uuid);
+  old_a := pg_temp.find(fr -> 'analyses', (a0 ->> 'id')::uuid);
+  perform pg_temp.chk(jsonb_array_length(full_rec -> 'readings') = 1 and jsonb_array_length(fr -> 'analyses') = 2, 'still one Reading, now with two Analyses');
+  perform pg_temp.chk(old_a ->> 'overall_outcome' = a0 ->> 'overall_outcome' and old_a ->> 'updated_at' = a0 ->> 'updated_at'
+                      and fr ->> 'result_text' = r0 ->> 'result_text', 'the Reading and the standard Analysis are unchanged');
+  -- the Timeline shows the later round under the original Reading Date
+  it := pg_temp.find(lifeos.timeline('{"from_date": "2032-07-10", "to_date": "2032-07-10"}'::jsonb) -> 'items', (r0 ->> 'id')::uuid);
+  perform pg_temp.chk(pg_temp.cnt(it -> 'record' -> 'analyses', (a ->> 'id')::uuid) = 1 and pg_temp.cnt(it -> 'record' -> 'analyses', (a0 ->> 'id')::uuid) = 1, 'both Analyses under the Reading Date');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 14. Section 6 steps 1 and 2: an end signal is a Story Context Cutoff; a stop without a signal saves nothing -------
+do $t$
+declare t constant text := 'end_signal_cutoff_saved_on_approval_silent_stop_saves_nothing';
+  sp jsonb; sl jsonb; sr jsonb; cnt_sl integer; cnt_sp integer;
+begin
+  -- conversation 1: the user tells about cousin Wei Ling's wedding plans, then says "thanks, that is all for now"
+  -- step 1: the end signal is a Story Context Cutoff; steps 3 and 4: present the updates, ask; the user approves (Agent steps)
+  -- steps 5 and 8: save the new Story Person and the new Storyline
+  sp := lifeos.story_person_create('{"name": "SKT_D14 Wei Ling", "gender": "female", "description": "SKT_D14 cousin in Seremban"}'::jsonb);
+  sl := lifeos.storyline_create(jsonb_build_object('title', 'SKT_D14 wedding plans', 'content', 'SKT_D14 Wei Ling plans her wedding for August',
+          'occurrence_date', '2032-08-01', 'story_person_ids', jsonb_build_array(sp ->> 'id')));
+  sr := lifeos.storyline_search(jsonb_build_object('story_person_ids', jsonb_build_array(sp ->> 'id')));
+  perform pg_temp.chk((sr ->> 'returned_count')::integer = 1 and sr -> 'results' -> 0 ->> 'id' = sl ->> 'id', 'the approved Storyline is saved');
+  -- conversation 2: Section 4 intake finds the Story Person and her Storyline
+  perform pg_temp.chk(pg_temp.cnt(lifeos.story_person_search('{"keyword": "SKT_D14 Wei Ling"}'::jsonb) -> 'results', (sp ->> 'id')::uuid) = 1, 'intake finds the Story Person');
+  -- the user says the wedding moved to December and that her brother Wei Han helps; then the conversation stops without a signal
+  -- step 2: no cutoff, so no save question and no save call (Agent step)
+  -- outcome: the stored Storybook is as conversation 1 left it
+  sr := lifeos.storyline_search(jsonb_build_object('story_person_ids', jsonb_build_array(sp ->> 'id')));
+  cnt_sl := (sr ->> 'returned_count')::integer;
+  perform pg_temp.chk(cnt_sl = 1 and sr -> 'results' -> 0 ->> 'content' = 'SKT_D14 Wei Ling plans her wedding for August'
+                      and sr -> 'results' -> 0 ->> 'updated_at' = sl ->> 'updated_at', 'the Storyline is unchanged, got ' || sr::text);
+  cnt_sp := (lifeos.story_person_search('{"keyword": "SKT_D14"}'::jsonb) ->> 'returned_count')::integer;
+  perform pg_temp.chk(cnt_sp = 1, 'no new Story Person is saved, got ' || cnt_sp);
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

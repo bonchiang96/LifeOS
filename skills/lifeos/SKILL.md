@@ -8,7 +8,7 @@ compatibility: Requires the LifeOS Supabase functions in the schema lifeos and t
 
 ## 1. Purpose and when to use
 
-LifeOS is the user's personal operating system. It runs on ChatGPT, Claude and other compatible AI platforms (KB 3.1).
+LifeOS is the user's personal operating system. It runs on ChatGPT, Claude and other compatible AI platforms.
 
 The four User-Facing Modules each have their own Skill:
 
@@ -21,7 +21,7 @@ The four User-Facing Modules each have their own Skill:
 
 This Skill owns the parts that every Module shares:
 
-1. Connection through the LifeOS Config file (Section 4).
+1. Connection through the LifeOS Config file, and the user Subject (Section 4).
 2. Request routing (Section 5).
 3. Subject, the shared continuing identity (Sections 6 to 9).
 4. Record links and Remarks (Sections 10 and 11).
@@ -41,31 +41,55 @@ Read the Contract for exact function names, fields, defaults and errors. Read th
 ## 3. Rules that apply to every flow
 
 1. Call only the Contract functions. Read or write no table directly (shared.md 1.1).
-2. You do the thinking before each call. You interpret the user, select the operation, present approvals and apply the rules (KB 3.2).
-3. Preserve the user's stated facts and uncertainty. Classify the user's input directly into Records (KB 3.2).
-4. Never invent business facts, stored Records, divination results, identity relationships, transaction amounts or timestamps (KB 3.2).
+2. You do the thinking before each call. You interpret the user, select the operation, present approvals and apply the rules.
+3. Preserve the user's stated facts and uncertainty. LifeOS keeps no separate copy of the user's input. Classify the input directly into Records.
+4. Never invent business facts, stored Records, divination results, identity relationships, transaction amounts or timestamps.
 5. Use the exact ID that a function returned. Never invent an ID (shared.md 1.2).
-6. Resolve relative dates in Asia/Kuala_Lumpur. Never invent a precise date or time from ambiguous wording (KB 6.9).
-7. Retrieve the source Record before you claim that a historical fact is saved (KB 6.9).
-8. A link that the user expresses clearly is made directly. Ask the user when a link is ambiguous (KB 6.7).
-9. A business flow describes the normal path. You handle runtime problems and exceptions yourself (KB 3.3).
-10. A user review loop may return to an earlier step until the user confirms (KB 3.3).
+6. Resolve relative dates in Asia/Kuala_Lumpur. Never invent a precise date or time from ambiguous wording.
+7. Retrieve the source Record before you claim that a historical fact is saved.
+8. A link that the user expresses clearly is made directly. Ask the user when a link is ambiguous.
+9. A business flow describes the normal path. You handle runtime problems and exceptions yourself.
+10. A user review loop may return to an earlier step until the user confirms.
 
 ## 4. Connect to LifeOS
 
-Purpose: reach the LifeOS functions on the user's Supabase project.
+Purpose: reach the LifeOS functions on the user's Supabase project, and make sure the user Subject exists.
 
 Input: the LifeOS Config file in the user's Google Drive.
 
-Steps:
+The LifeOS Config file is a Google Docs file named exactly "LifeOS Config". It may be anywhere in the user's Google Drive. It holds one field per line, in the form `field: value`. It has these fields:
 
-1. Find the Google Drive file named "LifeOS Config" through the host's Google Drive connector.
-2. Read the Supabase project ID from it. Read a publishable key only when your connection method needs one (shared.md 1.2).
-3. Choose a connection method, such as the platform's Supabase connector (shared.md 1.4).
-4. Call each function as an RPC function in the schema `lifeos`, with named parameters.
-5. Expect one `jsonb` value from every call.
+| Field | Need | Value |
+|---|---|---|
+| `supabase_project_id` | Required | The Supabase project ID, such as `vhdqadpeoyztrdpjkgvw`. |
+| `supabase_publishable_key` | Optional | A publishable key, only for a connection method that needs a key. |
 
-Outcome: every later flow calls the functions on the configured project.
+The file never holds a secret key or a service-role key.
+
+Steps to connect:
+
+1. Search the user's Google Drive by name for "LifeOS Config". Use the host's Google Drive connector.
+2. Read the file content line by line. Ignore every line without a colon.
+3. Read the value of `supabase_project_id`.
+4. Read `supabase_publishable_key` only when your connection method needs a key (shared.md 1.2).
+5. When the file is missing or has no `supabase_project_id`, tell the user that LifeOS is not configured.
+6. Then ask the user for the Supabase project ID, and use it for the connection.
+7. Choose a connection method, such as the platform's Supabase connector (shared.md 1.4).
+8. Call each function as an RPC function in the schema `lifeos`, with named parameters.
+9. Expect one `jsonb` value from every call.
+
+Steps for the user Subject:
+
+1. Find the user Subject with `subject_search` and `is_user` true.
+2. When it exists, use it as the user Subject in every flow.
+3. When it is missing, ask the user's name. Skip this question when the user's name is already known.
+4. Create the user Subject with `subject_create`, the user's name and `is_user` true.
+
+Every Record relates to the user, so the user Subject must exist. No wrong identity is possible for the user.
+
+Choices and approvals: the user Subject needs no separate approval.
+
+Outcome: every later flow calls the functions on the configured project and uses the user Subject.
 
 ## 5. Route the request
 
@@ -81,13 +105,13 @@ Steps:
 4. Keep shared requests in this Skill: Subject, Record links, Remarks, Timeline, Memory and Notebook.
 5. One statement may touch several Modules. Run each Module's flow, then link the Records (Section 10).
 
-Outcome: each part of the request runs in its owning Module, and every Record keeps its Module ownership (KB 10.4).
+Outcome: each part of the request runs in its owning Module, and every Record keeps its Module ownership.
 
 ## 6. Subject Discovery
 
-Purpose: identify the continuing entity that a Record relates to (KB 6.8.1).
+Purpose: identify the continuing entity that a Record relates to.
 
-A Subject keeps one continuing identity across Records and times. Confirmed kinds include people, residences, vehicles, household items, memberships, payment methods and bank accounts (KB 6.8).
+A Subject keeps one continuing identity across Records and times. Confirmed kinds include people, residences, vehicles, household items, memberships, payment methods and bank accounts.
 
 Input:
 
@@ -96,16 +120,19 @@ Input:
 
 Steps:
 
-1. Decide whether a Subject is needed. Create no Subject for an incidental or generic mention (KB 6.8).
-2. Apply the granularity of KB 6.8:
+1. Decide whether a Subject is needed. Create no Subject for an incidental or generic mention.
+2. Make a Subject only as detailed as the user's records need. Finer detail stays in the Records:
    - Restaurant or shop: one Subject per brand. The branch stays in the Expense.
    - Vehicle: one Subject per plate number.
-   - Product: one Subject per kind of thing the user tracks, such as shampoo.
+   - Product: one Subject per kind of thing the user tracks, such as shampoo. The brand stays in the Expense.
    - Group, such as colleagues: no Subject. Record it as stated.
-3. Read the catalog Notebooks `subject_types` and `subject_tags` with `notebook_read` (Section 16). Read no other key in this step.
+3. Read the Subject Discovery Guidance with `notebook_read` (Section 16).
+   - The guidance is the content of the `subject_types` and `subject_tags` Notebooks. Read both keys.
+   - It holds entity categories, candidate search hints and contextual clues.
+   - Read no other key in this step.
 4. Search the Subject Records with `subject_search`, `subject_check` and `subject_read`.
-5. Treat each match only as a candidate. Current Subject Records establish identity (KB 5.2).
-6. Find the user Subject with `subject_search` and `is_user` true. A statement about the user never needs confirmation.
+5. Treat each match only as a candidate. Current Subject Records establish identity.
+6. Use the user Subject from Section 4 for a statement about the user. It never needs confirmation.
 7. Count the evidence for any other candidate. A single matching name is not enough.
 8. With at least two pieces of evidence, link the Subject directly.
 9. Otherwise propose the candidate and say why it may match the user's statement.
@@ -125,7 +152,7 @@ Outcome: the Record links to the confirmed Subject, or proceeds without a Subjec
 
 ## 7. Subject maintenance
 
-Purpose: keep Subject identity correct (KB 6.8.2).
+Purpose: keep Subject identity correct.
 
 Input: new evidence about a Subject, such as another name.
 
@@ -143,7 +170,7 @@ Outcome: the Subject holds its current authoritative identity.
 
 ## 8. Duplicate Subject merge
 
-Purpose: consolidate two Subjects that are one entity (KB 6.8.2).
+Purpose: consolidate two Subjects that are one entity.
 
 Input: two Subjects that the user or the evidence shows to be the same entity.
 
@@ -151,14 +178,20 @@ Steps:
 
 1. Read both Subjects with `subject_read`.
 2. Present both and ask for the user's explicit approval to merge.
-3. Check both Subjects for a Person Profile. `subject_read` returns it.
-4. When both Subjects have a Person Profile, the user resolves the two Profiles first. Use the [communication-assistant](../communication-assistant/SKILL.md) Skill.
+3. Check both Subjects for a Person Profile. `subject_read` returns it as `person_profile_id`.
+4. When both Subjects have a Person Profile, merge the two Profiles first under the [communication-assistant](../communication-assistant/SKILL.md#5-profile-identity-changes-and-deletion) Skill.
+   - The user chooses the Profile that stays and each conflicting Rule that stays.
+   - That flow ends with `communication_profile_merge`. It moves the Rules and Message History and deletes the emptied Profile.
+   - Continue only after `communication_profile_merge` succeeds.
 5. Combine the identity information of both Subjects into one identity.
-6. Call `subject_merge` with the kept Subject, the merged Subject and the combined identity.
+6. Call `subject_merge` with `keep_id`, `merge_id` and the combined `identity`.
 
-Choices and approvals: the merge needs the user's explicit approval.
+Choices and approvals:
 
-Outcome: the kept Subject takes the combined identity. Source Records stay unchanged apart from their Subject references.
+1. The merge needs the user's explicit approval.
+2. With two Person Profiles, the user chooses the kept Profile and each kept Rule.
+
+Outcome: the kept Subject takes the combined identity. Source Records stay unchanged apart from their Subject references. With two Person Profiles, the kept Profile holds the Rules and Message History of both.
 
 ## 9. Subject deletion
 
@@ -168,9 +201,9 @@ Input: the Subject to delete.
 
 Steps:
 
-1. Find the Subject. Ask the user when it is unclear which one is meant (KB 6.9).
+1. Find the Subject. Ask the user when it is unclear which one is meant.
 2. Check for its Person Profile with `subject_read`.
-3. When it has a Person Profile, the user decides the Profile's outcome first (KB 9.1):
+3. When it has a Person Profile, the user decides the Profile's outcome first:
    - The Profile belongs to another person: link it to the correct Subject.
    - The user no longer wants the Profile: delete it.
    - Both use the [communication-assistant](../communication-assistant/SKILL.md) Skill.
@@ -178,11 +211,11 @@ Steps:
 
 Choices and approvals: the user decides the Profile's outcome.
 
-Outcome: the Subject is deleted. Other Records keep their links to it and ignore them (KB 6.9).
+Outcome: the Subject is deleted. Other Records keep their links to it and ignore them.
 
 ## 10. Record links
 
-Purpose: connect Records that describe the same matter, and connect a Record to its Subject (KB 6.7).
+Purpose: connect Records that describe the same matter, and connect a Record to its Subject.
 
 Input: Records that the user describes as one matter, and their Subjects.
 
@@ -198,11 +231,11 @@ Steps:
 
 Example: "I had dinner with Nicholas today and paid RM80" gives a dinner Event and an RM80 Expense. Both link to each other and to the Subject Nicholas.
 
-Listing rule: every listing shows each connected item once (KB 6.7).
+Listing rule: every listing shows each connected item once.
 
 1. A Record lists each connected Subject once.
 2. A Subject lists each connected Record once.
-3. Several paths may lead to one item. Their order is fixed: `record_link`, `observation_subject`, `payment_method`, `merchant`, `line_item`, `story_person_subject`, `person_profile_subject` (M-0022 D2).
+3. Several paths may lead to one item. Their order is fixed: `record_link`, `observation_subject`, `payment_method`, `merchant`, `line_item`, `story_person_subject`, `person_profile_subject`.
 4. On a Subject, `via_list` keeps every path in that order. `via` is the first path.
 5. Count each listed item once. Never rank a matter or a person higher because several paths reach it.
 
@@ -210,7 +243,7 @@ Outcome: retrieval can start from any Record and reach the related Records and S
 
 ## 11. Remarks
 
-Purpose: add a simple detail to a prior Record without a structured update (KB 6.9).
+Purpose: add a simple detail to a prior Record without a structured update.
 
 Input: a small additive detail about an existing Record.
 
@@ -233,7 +266,7 @@ Outcome: the Record holds the detail, and no duplicate Record exists.
 
 ## 12. Timeline
 
-Purpose: present what the user does or what happens to the user over a period (KB 10.1).
+Purpose: present what the user does or what happens to the user over a period.
 
 Input: a period question, such as "what did I do last week" or "what is on this week".
 
@@ -245,13 +278,13 @@ Steps:
 4. When the question is "what happens today", run the overdue check of the [personal-records](../personal-records/SKILL.md) Skill.
 5. Present the result under Section 13.
 
-Choices: when the user asks what they recorded, call `timeline` with `date_basis` "record" (KB 10.2).
+Choices: when the user asks what they recorded, call `timeline` with `date_basis` "record".
 
 Outcome: one complete answer for the period.
 
 ## 13. Timeline presentation
 
-Purpose: turn the Timeline data into one natural answer (KB 10.1 and 10.3).
+Purpose: turn the Timeline data into one natural answer.
 
 Input: the `timeline` result.
 
@@ -267,7 +300,7 @@ Steps:
 8. Include plans that did not happen. State a Missed or Cancelled Status as fact.
 9. Present a past Schedule that is still Planned as a plan with an unknown outcome. Never call it missed.
 10. Count an Expense once, on its Transaction Date. Count a Refund as a negative amount on its own date.
-11. Show a Reading on its original Reading Date. Show its later Analyses under it (KB 10.2).
+11. Show a Reading on its original Reading Date. Show its later Analyses under it.
 12. Show a Message on its Message History date. That date alone does not show that the message was delivered.
 13. Keep each Record's Business Type, source identity and Module ownership.
 14. When `recorded_earlier` holds items, add a short closing note about them.
@@ -276,7 +309,7 @@ Outcome: the user sees what really happened or will happen in the period.
 
 ## 14. Subject questions
 
-Purpose: answer a question about a person or thing from the user's records (KB 10.5).
+Purpose: answer a question about a person or thing from the user's records.
 
 Input: a question about one Subject.
 
@@ -294,7 +327,7 @@ Steps:
    - In a general question, money has low priority and covers one to three months at most.
    - Give no total of spending with that person. An Expense may show the place without the amount.
 7. End an overview with what you did not cover, such as older Records or plans that have not happened.
-8. For a requested full overview, follow wider approved Subject and Person Profile relationships (KB 10.4).
+8. For a requested full overview, follow wider approved Subject and Person Profile relationships.
 9. Never present uncertain timing or a third-party story as a real Event on an inferred date.
 
 Choices: when the user says how to present these answers, save it to LifeOS Memory (Section 15).
@@ -303,7 +336,7 @@ Outcome: an answer that keeps each Subject's identity, provenance and Record own
 
 ## 15. LifeOS Memory
 
-Purpose: keep reusable learned information across Agents, Conversations and AI platforms (KB 4.1).
+Purpose: keep reusable learned information across Agents, Conversations and AI platforms.
 
 LifeOS Memory is independent from other Records. It may hold context about entities without Subjects.
 
@@ -343,11 +376,15 @@ Outcome: later operations reuse the improved Learning.
 
 ## 16. Notebook
 
-Purpose: keep fixed-purpose reference vocabularies (KB 5.1).
+Purpose: keep fixed-purpose reference vocabularies.
 
 Notebook is separate from LifeOS Memory. It holds no Agent learning and no canonical Subject Records.
 
-The catalog keys are `subject_types`, `subject_tags`, `expense_tags`, `note_types` and `defaults`. The `defaults` Notebook holds the default Currency, MYR.
+The catalog keys are `subject_types`, `subject_tags`, `expense_tags`, `note_types`, `defaults`, `language_modes` and `platforms`:
+
+1. `subject_types` and `subject_tags` hold the Subject Discovery Guidance (Section 6).
+2. `defaults` holds the default Currency, MYR.
+3. `language_modes` and `platforms` hold the Language Mode and Platform values in use for Communication Assistant.
 
 Input: a vocabulary or default value that a Module flow needs.
 
@@ -357,9 +394,12 @@ Steps:
 2. List the catalog with `notebook_list` when you need another relevant Notebook.
 3. Compare a candidate's semantic meaning with the current entries.
 4. Reuse equivalent vocabulary, or create a justified entry.
+   - In `language_modes` and `platforms`, reuse an existing value.
+   - Add a new value there only when no existing value fits. Rule resolution then matches the stored values.
+   - Write one value per line, exactly as the Agent stores it in `language_mode` or `platform`.
 5. Write the full new content with `notebook_update`. Add, revise, consolidate, reorganise and remove entries yourself.
 6. You may keep other justified reusable vocabulary in a new Notebook key.
 
-Choices and approvals: Notebook maintenance needs no approval. It never replaces the user confirmation that a Subject or other Record operation needs (KB 5.2).
+Choices and approvals: Notebook maintenance needs no approval. It never replaces the user confirmation that a Subject or other Record operation needs.
 
 Outcome: Module flows reuse one consistent vocabulary.

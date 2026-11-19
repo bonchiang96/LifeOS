@@ -8,7 +8,7 @@ compatibility: Requires the LifeOS Supabase functions in the schema lifeos and t
 
 ## 1. Purpose and when to use
 
-Financial Records record Expenses only (KB 7.6). Each Expense is one spending transaction. A Refund Expense records money that came back (KB 7.1).
+Financial Records record Expenses only. Each Expense is one spending transaction. A Refund Expense records money that came back.
 
 Use this Skill after the [lifeos](../lifeos/SKILL.md) entry Skill routes a Financial Records request.
 
@@ -22,7 +22,7 @@ The entry Skill holds Subject Discovery, Record links, Remarks, Timeline, Memory
 
 ## 3. Rules that apply to every flow
 
-1. Each Expense keeps Transaction Date, Merchant, Payment Method, Expense Total, Currency and relevant Metadata (KB 7.1).
+1. Each Expense keeps Transaction Date, Merchant, Payment Method, Expense Total, Currency and relevant Metadata.
 2. Always supply the Currency. Read the default from the `defaults` Notebook with `notebook_read`. It holds MYR.
 3. Each Expense uses one Payment Method Subject. Identify it under the entry Skill Section 6.
 4. An Expense with zero payable Total uses Cash as its Payment Method.
@@ -34,16 +34,16 @@ The entry Skill holds Subject Discovery, Record links, Remarks, Timeline, Memory
 10. An item-specific discount reduces that item's verified final price.
 11. A bill-wide discount, voucher, subsidy or rounding is a separate Adjustment Line.
 12. Verified Receipt or user-confirmed amounts are authoritative. Keep their confirmed precision.
-13. The sum of Lines and each Quantity × Unit Price are comparison checks only (KB 7.1).
+13. The sum of Lines and each Quantity × Unit Price are comparison checks only.
     - During review, run both checks yourself and show each discrepancy to the user.
     - After a save, the `discrepancies` field of the return repeats these checks.
     - Never replace a confirmed value.
 14. A missing Merchant or Item Subject does not prevent recording.
-15. Every Expense correction and deletion carries a reason (KB 7.5).
+15. Every Expense correction and deletion carries a reason.
 
 ## 4. Record an Expense from conversation
 
-Purpose: save an ordinary completed purchase from reliable conversational information (KB 7.2).
+Purpose: save an ordinary completed purchase from reliable conversational information.
 
 Input:
 
@@ -67,7 +67,7 @@ Outcome: one purchase Expense with its Lines.
 
 ## 5. Record Expenses from Receipts
 
-Purpose: turn uploaded Receipts or Invoices into reviewed Expenses (KB 7.2).
+Purpose: turn uploaded Receipts or Invoices into reviewed Expenses.
 
 Input: one or more uploaded Receipts or Invoices.
 
@@ -101,7 +101,7 @@ Outcome: one Expense per approved Receipt. The uploaded file is not kept. The Ex
 
 ## 6. Classify Expense Lines
 
-Purpose: give each confirmed Item a Category and Tags (KB 7.3).
+Purpose: give each confirmed Item a Category and Tags.
 
 Input: Expense Lines whose Item identity the user confirmed.
 
@@ -122,7 +122,7 @@ Outcome: each purchase Line has one Category and its Tags.
 
 ## 7. Record a credit purchase
 
-Purpose: record a purchase on credit, including PayLater and a credit card (KB 7.4).
+Purpose: record a purchase on credit, including PayLater and a credit card.
 
 Input: the purchase and its credit Payment Method.
 
@@ -135,7 +135,7 @@ Outcome: one ordinary Expense.
 
 ## 8. Record a repayment or debt transfer
 
-Purpose: record a later repayment between Payment Methods, such as paying a PayLater balance by credit card (KB 7.4).
+Purpose: record a later repayment between Payment Methods, such as paying a PayLater balance by credit card.
 
 Input: the repayment, its date and both Payment Methods.
 
@@ -149,7 +149,7 @@ Outcome: one Event linked to both Payment Methods. The original Expense already 
 
 ## 9. Record a Refund, Return or Reversal
 
-Purpose: record money that came back (KB 7.5).
+Purpose: record money that came back.
 
 Return concerns goods sent back. Refund concerns money returned. Reversal concerns cancellation of an original transaction. All three follow this flow.
 
@@ -182,7 +182,7 @@ Outcome: a new Refund Expense linked to the original. It keeps the original Paym
 
 ## 10. Correct an Expense
 
-Purpose: fix a wrong detail of a purchase or a Refund and keep the correction history (KB 7.5).
+Purpose: fix a wrong detail of a purchase or a Refund and keep the correction history.
 
 Input: the Expense, the corrected details and the reason.
 
@@ -202,7 +202,7 @@ Outcome: the Expense holds the corrected details. Its earlier version and the re
 
 ## 11. Delete an Expense
 
-Purpose: remove a purchase or a Refund that the user wants deleted (KB 7.5).
+Purpose: remove a purchase or a Refund that the user wants deleted.
 
 Input: the Expense and the deletion reason.
 
@@ -218,30 +218,38 @@ Outcome: the Expense is deleted with its reason in its history.
 
 ## 12. Delete a purchase that has Refunds
 
-Purpose: decide the deletion of a purchase whose money partly or fully came back (KB 7.5, M-0022 D5).
+Purpose: decide the deletion of a purchase that has one or more active Refunds.
 
 Input: the purchase and its active Refunds from the `refunds` field.
 
 Steps:
 
-1. Ask, for each Refund, whether its money was really received.
-2. State that deleting the purchase also deletes the Refund.
-3. When the money was not received, delete the purchase with `expense_delete` after the user confirms. Its Refunds go with it.
-4. When the money was received, the purchase really happened. Ask the user why the purchase should be deleted.
-5. When a purchase detail is wrong, such as the amount, date or merchant, correct the purchase under Section 10. The Refund stays within its limits.
-6. When the user still wants deletion, delete the purchase with `expense_delete` after the user confirms. Its Refunds go with it.
+1. Ask about each Refund whether its money was really received.
+2. State that deleting the purchase also deletes all its Refunds.
+3. When no Refund money was received, delete the purchase with `expense_delete` after the user confirms. All its Refunds go with it.
+4. When at least one Refund's money was received, the purchase really happened. Ask the user why the purchase should be deleted.
+5. When a purchase detail is wrong, such as the amount, date or merchant, correct the purchase:
+   1. Keep each Refund whose money was received.
+   2. Delete each Refund without received money with `expense_delete`. Give the reason that its money was never received.
+   3. Correct the purchase under Section 10. The kept Refunds stay within its limits.
+6. When the user still wants deletion, delete the purchase with `expense_delete` after the user confirms. All its Refunds go with it.
+
+A Refund without received money never happened. Keeping it would make totals wrong.
 
 Choices and approvals:
 
-1. The user answers whether each Refund's money was received.
-2. The user chooses a correction or a deletion.
-3. The user confirms the deletion.
+1. The user answers about each Refund whether its money was received.
+2. When some Refund money was received, the user chooses a correction or a deletion.
+3. The user confirms the deletion of the purchase.
 
-Outcome: either a corrected purchase that keeps its Refunds, or a deleted purchase with its Refunds deleted too.
+Outcome: one of two results:
+
+1. A corrected purchase that keeps each received Refund. Each Refund without received money is deleted with its reason.
+2. A deleted purchase with all its Refunds deleted too.
 
 ## 13. Present a spending report
 
-Purpose: show how much was spent over a period (KB 7.6).
+Purpose: show how much was spent over a period.
 
 Input: the period, and optionally one currency.
 
@@ -268,7 +276,7 @@ Outcome: one spending report in the fixed order.
 
 ## 14. Record money coming in
 
-Purpose: record income without Financial Records (KB 7.6).
+Purpose: record income without Financial Records.
 
 Input: money the user received.
 

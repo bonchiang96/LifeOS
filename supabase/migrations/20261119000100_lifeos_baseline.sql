@@ -1110,6 +1110,7 @@ $$;
 
 -- Creates the Notebook when absent (Contract 3.1 items 2 to 4). Returns true when this call created it.
 -- A new note_types Notebook starts with the five default Note Types, one per line (M-0018 D4).
+-- language_modes and platforms are catalog Notebooks that start empty (M-0023 D12).
 create or replace function lifeos._notebook_init(p_key text, p_name text)
 returns boolean language plpgsql volatile set search_path = lifeos, pg_temp
 as $$
@@ -1127,6 +1128,8 @@ begin
       when 'expense_tags' then 'Expense Tags'
       when 'note_types' then 'Note Types'
       when 'defaults' then 'Defaults'
+      when 'language_modes' then 'Language Modes'
+      when 'platforms' then 'Platforms'
       else p_key
     end);
   insert into lifeos.notebooks (key, name, content)
@@ -4589,6 +4592,83 @@ begin
   return jsonb_build_object('removed', v_rows > 0);
 end $$;
 
+-- Moves the Rules and the Message History of one Person Profile to the kept Person Profile,
+-- then deletes the emptied Profile (Contract 8.1.8, M-0023 D5). A Rule conflict moves nothing.
+-- Deleted Message History items move too and keep their deleted_at.
+create or replace function lifeos.communication_profile_merge(p_input jsonb)
+returns jsonb language plpgsql security definer set search_path = lifeos, pg_temp
+as $$
+declare
+  v jsonb := lifeos._obj(p_input);
+  v_keep uuid;
+  v_merge uuid;
+  k lifeos.communication_profiles;
+  m lifeos.communication_profiles;
+  v_conflicts text;
+  v_deleted jsonb;
+  n_rules integer := 0;
+  n_messages integer := 0;
+begin
+  perform lifeos._check_fields(v, array['keep_id', 'merge_id']);
+  perform lifeos._require(v, array['keep_id', 'merge_id']);
+  perform lifeos._check_types(v, p_uuids => array['keep_id', 'merge_id']);
+  v_keep := (v ->> 'keep_id')::uuid;
+  v_merge := (v ->> 'merge_id')::uuid;
+  if v_keep = v_merge then
+    raise exception 'invalid relationship' using detail = 'keep_id and merge_id are the same Profile';
+  end if;
+
+  select * into k from lifeos.communication_profiles where id = v_keep for update;
+  if not found then
+    raise exception 'record not found' using detail = 'keep_id';
+  end if;
+  if k.deleted_at is not null then
+    raise exception 'record deleted' using detail = 'keep_id';
+  end if;
+  select * into m from lifeos.communication_profiles where id = v_merge for update;
+  if not found then
+    raise exception 'record not found' using detail = 'merge_id';
+  end if;
+  if m.deleted_at is not null then
+    raise exception 'record deleted' using detail = 'merge_id';
+  end if;
+  if k.profile_type <> 'person' then
+    raise exception 'invalid relationship' using detail = 'keep_id is not a Person Profile';
+  end if;
+  if m.profile_type <> 'person' then
+    raise exception 'invalid relationship' using detail = 'merge_id is not a Person Profile';
+  end if;
+
+  -- A Rule of merge_id with the same language_mode, dimension and rule_key as a Rule of keep_id is a conflict.
+  select string_agg(format('%s/%s/%s', coalesce(r.language_mode, 'neutral'), r.dimension, r.rule_key), ', '
+                    order by r.dimension, r.rule_key, r.language_mode nulls first)
+    into v_conflicts
+  from lifeos.communication_rules r
+  join lifeos.communication_rules x
+    on x.profile_id = v_keep
+   and x.language_mode is not distinct from r.language_mode
+   and x.dimension = r.dimension
+   and x.rule_key = r.rule_key
+  where r.profile_id = v_merge;
+  if v_conflicts is not null then
+    raise exception 'invalid relationship' using detail = format('both Profiles have the Rule: %s', v_conflicts);
+  end if;
+
+  -- Moved Rules and messages keep every other field, as in subject_merge (shared.md 5.7 item 7).
+  update lifeos.communication_rules set profile_id = v_keep where profile_id = v_merge;
+  get diagnostics n_rules = row_count;
+  update lifeos.communication_messages set profile_id = v_keep where profile_id = v_merge;
+  get diagnostics n_messages = row_count;
+
+  v_deleted := lifeos._soft_delete('communication_profiles', v_merge);
+
+  return jsonb_build_object(
+    'profile', (select lifeos._profile_json(x) from lifeos.communication_profiles x where x.id = v_keep),
+    'merged_id', v_merge,
+    'deleted_at', v_deleted -> 'deleted_at',
+    'moved', jsonb_build_object('rules', n_rules, 'messages', n_messages));
+end $$;
+
 -- -----------------------------------------------------------------------------
 -- 8.2 Rules
 -- -----------------------------------------------------------------------------
@@ -4994,10 +5074,10 @@ end $$;
 -- The access model of implementation notes 5 to 8:
 --   1. Revokes EXECUTE on every lifeos function from PUBLIC, anon and authenticated.
 --   2. Grants USAGE on schema lifeos to anon and authenticated.
---   3. Grants EXECUTE on the 98 Contract functions to anon and authenticated.
+--   3. Grants EXECUTE on the 99 Contract functions to anon and authenticated.
 --      Internal helpers (names starting with an underscore) stay revoked.
 --   4. Revokes every table privilege from PUBLIC, anon and authenticated.
---   5. Checks that the schema holds exactly the 98 Contract functions plus helpers,
+--   5. Checks that the schema holds exactly the 99 Contract functions plus helpers,
 --      each with one signature, SECURITY DEFINER and search_path = lifeos, pg_temp.
 -- -----------------------------------------------------------------------------
 revoke all on all functions in schema lifeos from public, anon, authenticated;
@@ -5036,7 +5116,8 @@ declare
     -- Chapter 8: Communication Assistant
     'communication_profile_create', 'communication_profile_read', 'communication_profile_search',
     'communication_profile_update', 'communication_profile_delete', 'communication_profile_membership_set',
-    'communication_profile_membership_remove', 'communication_rule_upsert', 'communication_rule_delete',
+    'communication_profile_membership_remove', 'communication_profile_merge', 'communication_rule_upsert',
+    'communication_rule_delete',
     'communication_rule_state', 'communication_resolve', 'communication_runtime_context',
     'communication_message_finalize', 'communication_message_history_read', 'communication_message_history_search',
     'communication_message_history_delete',
@@ -5045,8 +5126,8 @@ declare
   v_name text;
   v_bad text;
 begin
-  if cardinality(v_contract) <> 98 then
-    raise exception 'grants: the Contract list holds % names, expected 98', cardinality(v_contract);
+  if cardinality(v_contract) <> 99 then
+    raise exception 'grants: the Contract list holds % names, expected 99', cardinality(v_contract);
   end if;
 
   -- Every Contract function exists with exactly one signature.

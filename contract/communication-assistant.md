@@ -126,6 +126,34 @@ Message History fields: `profile_id`, `message_text`, `language_mode`, `platform
 
 **Returns:** `{ "removed": boolean }`.
 
+### 8.1.8 communication_profile_merge
+
+**Signature:** `communication_profile_merge(p_input jsonb)`
+
+**Purpose:** Move the Rules and Message History of a duplicate Person Profile to the Person Profile that the user keeps.
+
+**Required p_input fields:** `keep_id`, `merge_id`.
+
+**Supported p_input fields:** `keep_id`, `merge_id`.
+
+**Defaults:** None.
+
+**Behavior:**
+1. Both Profiles are active Person Profiles ([shared.md 1.5 item 14](shared.md#15-common-interface-semantics)). A Group or Audience Profile returns "invalid relationship".
+2. The same ID in `keep_id` and `merge_id` returns "invalid relationship".
+3. A Rule conflict exists when both Profiles have a Rule with the same `language_mode`, `dimension` and `rule_key`. A `null` `language_mode` matches only `null`.
+4. Any Rule conflict returns "invalid relationship", and nothing moves. Its detail names each conflicting Rule.
+5. The Agent resolves each Rule conflict with the user before the call. The user chooses the Rule that stays, and the Agent deletes the other Rule with 8.2.2.
+6. The function moves every Rule and every Message History item of `merge_id` to `keep_id`. This includes deleted Message History items.
+7. Moved Rules keep every other field. Moved messages keep every other field, including `deleted_at`.
+8. The function then deletes `merge_id` under [shared.md 1.5 item 8](shared.md#15-common-interface-semantics). Its memberships and other fields stay stored.
+9. All steps run in one transaction.
+10. In a merge of two Person Subjects, the Agent calls this function before [shared.md 5.7](shared.md#57-subject_merge).
+
+**Returns:** `{ "profile": <complete kept Profile>, "merged_id": uuid, "deleted_at": timestamp, "moved": { "rules": number, "messages": number } }`.
+- `rules` counts the moved Rules.
+- `messages` counts the moved Message History items, including deleted ones.
+
 ## 8.2 Rules
 
 ### 8.2.1 communication_rule_upsert

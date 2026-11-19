@@ -11,7 +11,7 @@ Contents:
 
 # 3. Notebook
 
-A Notebook holds one fixed-purpose reference vocabulary. The catalog keys are `subject_types`, `subject_tags`, `expense_tags`, `note_types` and `defaults`. The `defaults` Notebook holds default values that the Agent applies, such as the default currency. The Agent may add other keys.
+A Notebook holds one fixed-purpose reference vocabulary. The catalog keys are `subject_types`, `subject_tags`, `expense_tags`, `note_types`, `defaults`, `language_modes` and `platforms`. The `defaults` Notebook holds default values that the Agent applies, such as the default currency. The `language_modes` and `platforms` Notebooks hold the Language Mode and Platform values in use for Communication Assistant. The Agent may add other keys.
 
 Notebook fields: `key`, `name`, `content`, `created_at`, `updated_at`.
 
@@ -28,7 +28,7 @@ A key matches `^[a-z][a-z0-9_]*$` and is unique. `content` is plain text.
 **Behavior:**
 1. When a Notebook with `p_key` exists, the function returns it unchanged.
 2. When none exists, the function creates one Notebook with the starting `content` from item 4 and returns it.
-3. The name of a new Notebook is `p_name` when supplied. Otherwise the catalog keys take these names: `subject_types` = "Subject Types", `subject_tags` = "Subject Tags", `expense_tags` = "Expense Tags", `note_types` = "Note Types", `defaults` = "Defaults". Any other key takes the key as its name.
+3. The name of a new Notebook is `p_name` when supplied. Otherwise the catalog keys take these names: `subject_types` = "Subject Types", `subject_tags` = "Subject Tags", `expense_tags` = "Expense Tags", `note_types` = "Note Types", `defaults` = "Defaults", `language_modes` = "Language Modes", `platforms` = "Platforms". Any other key takes the key as its name.
 4. A new `note_types` Notebook starts with the content `Idea`, `Feeling`, `Experience`, `Explanation`, `General`, one per line. A new `defaults` Notebook starts with the content `currency: MYR`. Every other new Notebook starts empty.
 
 **Returns:** The complete Notebook, plus `"initialised": boolean`, which is true when this call created it.

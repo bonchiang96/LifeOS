@@ -8,7 +8,7 @@ compatibility: Requires the LifeOS Supabase functions in the schema lifeos and t
 
 ## 1. Purpose and when to use
 
-Personal Records classify personal information by business meaning (KB 6.1):
+Personal Records classify personal information by business meaning:
 
 1. Schedule: an intended matter.
 2. Event: an actual occurrence.
@@ -26,18 +26,18 @@ The entry Skill holds Subject Discovery, Record links, Remarks, Timeline, Memory
 
 ## 3. Rules that apply to every flow
 
-1. Choose the Record Type by business meaning. A timestamp alone does not decide it (KB 6.1).
+1. Choose the Record Type by business meaning. A timestamp alone does not decide it.
 2. Classify a reported thought as Note, an actual occurrence as Event and an intended matter as Schedule.
-3. Schedule, Event and Observation always have a date. A matter without a date is a Note (KB 6.6).
-4. Resolve relative dates in Asia/Kuala_Lumpur. Never invent a precise date or time (KB 6.9).
+3. Schedule, Event and Observation always have a date. A matter without a date is a Note.
+4. Resolve relative dates in Asia/Kuala_Lumpur. Never invent a precise date or time.
 5. Keep the user's imprecise timing wording in `time_text`. An unknown time stays unknown.
 6. A Subject supplies identity without changing a Record's type. Identify it under the entry Skill Section 6.
-7. Before you decide on a new Record, an amendment or a Remark, retrieve matching prior Records (KB 6.9).
-8. An edit changes the Record directly and keeps only its latest content (KB 6.9).
+7. Before you decide on a new Record, an amendment or a Remark, retrieve matching prior Records.
+8. An edit changes the Record directly and keeps only its latest content.
 
 ## 4. Record a Schedule
 
-Purpose: record a matter that is planned, arranged, expected, intended or required (KB 6.2).
+Purpose: record a matter that is planned, arranged, expected, intended or required.
 
 Input:
 
@@ -52,11 +52,11 @@ Steps:
 2. Create the Schedule with `schedule_create`. Its Status starts as Planned.
 3. Link it to its Subjects and related Records under the entry Skill Section 10.
 
-Outcome: one Planned Schedule. A Schedule that nobody handles stays Planned and has no further business effect (KB 6.2).
+Outcome: one Planned Schedule. A Schedule that nobody handles stays Planned and has no further business effect.
 
 ## 5. Record a repeating series
 
-Purpose: record a repeating matter as individual Schedules, one per occurrence (KB 6.2).
+Purpose: record a repeating matter as individual Schedules, one per occurrence.
 
 Input:
 
@@ -74,11 +74,11 @@ Choices and approvals: the user confirms the duration.
 
 Outcome: a finite series. Each Schedule has its own Status, Event link and overdue check. After the last Schedule, create no new Schedules unless the user asks.
 
-Open-ended annual matters, such as birthdays, are outside the current product scope (KB 6.2).
+Open-ended annual matters, such as birthdays, are outside the current product scope.
 
 ## 6. Add a Schedule to an existing series
 
-Purpose: let a later Schedule join a series (KB 6.2).
+Purpose: let a later Schedule join a series.
 
 Input: the series and the new occurrence.
 
@@ -92,7 +92,7 @@ Outcome: the new Schedule shares the Series ID of the series.
 
 ## 7. Change one Schedule
 
-Purpose: reschedule, change the content of, cancel or mark missed one Schedule (KB 6.2).
+Purpose: reschedule, change the content of, cancel or mark missed one Schedule.
 
 Input: the user's change, such as "move the dentist to 3 pm" or "cancel Friday's dentist".
 
@@ -112,7 +112,7 @@ Outcome: the Schedule holds its latest content and Status.
 
 ## 8. Change a series from now on
 
-Purpose: change the later Planned Schedules of one series (KB 6.2).
+Purpose: change the later Planned Schedules of one series.
 
 Input: the change and the point from which it applies.
 
@@ -128,7 +128,7 @@ Outcome: later Planned Schedules carry the change. Earlier Schedules keep their 
 
 ## 9. Stop a series
 
-Purpose: end a repeating matter (KB 6.2).
+Purpose: end a repeating matter.
 
 Input: the series and the date from which it stops.
 
@@ -142,7 +142,7 @@ Outcome: the later Planned Schedules become Cancelled. Past Schedules and Events
 
 ## 10. Record an Event
 
-Purpose: record an actual action or occurrence, regardless of who initiated it (KB 6.3 and 6.4).
+Purpose: record an actual action or occurrence, regardless of who initiated it.
 
 Event recording is the base flow. Schedule linkage is a conditional branch inside it.
 
@@ -171,7 +171,7 @@ Outcome: one Event, linked to its Schedule when the user confirmed the match.
 
 ## 11. Link an existing Event to a Schedule
 
-Purpose: connect a recorded Event to the Schedule it actualises (KB 6.4 and 6.9).
+Purpose: connect a recorded Event to the Schedule it actualises.
 
 Input: an Event without a Schedule link, such as an Event whose Schedule was deleted.
 
@@ -187,7 +187,7 @@ Outcome: the Event carries the Schedule's planned date and time, and the Schedul
 
 ## 12. Overdue check
 
-Purpose: settle the Planned Schedules whose time passed without an Event (KB 6.2 and 6.4).
+Purpose: settle the Planned Schedules whose time passed without an Event.
 
 Input: the user asks what happens today, or asks a similar question.
 
@@ -208,7 +208,7 @@ Outcome: each answered Schedule holds the Status the user confirmed. An unanswer
 
 ## 13. Record an Observation
 
-Purpose: record a Subject's numeric Measurement or descriptive or categorical State (KB 6.5).
+Purpose: record a Subject's numeric Measurement or descriptive or categorical State.
 
 Input:
 
@@ -235,7 +235,7 @@ Outcome: one Observation of its Subject at the observation time. It does not imp
 
 ## 14. Correct an Observation or record a change
 
-Purpose: keep Observations true to their observation time (KB 6.5).
+Purpose: keep Observations true to their observation time.
 
 Input: a corrected value, or a later real-world change.
 
@@ -249,7 +249,7 @@ Outcome: Observations of the same Subject relate only through that Subject.
 
 ## 15. Record a Note
 
-Purpose: preserve ideas, thoughts, feelings, experiences, explanations or other narrative information (KB 6.6).
+Purpose: preserve ideas, thoughts, feelings, experiences, explanations or other narrative information.
 
 Input: the narrative. A matter without a date is also a Note.
 
@@ -269,7 +269,7 @@ Outcome: one Note dated on its record date. A link does not change its type.
 
 ## 16. Record a feeling about an earlier day
 
-Purpose: keep what happened apart from the feeling about it (KB 6.6).
+Purpose: keep what happened apart from the feeling about it.
 
 Input: a feeling about an earlier day, such as last Tuesday.
 
@@ -284,7 +284,7 @@ Outcome: the Event holds what happened on the earlier day. The Note holds today'
 
 ## 17. Amend a Record
 
-Purpose: update a prior Record instead of creating a duplicate (KB 6.9).
+Purpose: update a prior Record instead of creating a duplicate.
 
 Input: new information about a matter that may already be recorded.
 
@@ -306,7 +306,7 @@ Outcome: the Record holds its latest content, and no duplicate exists.
 
 ## 18. Delete a Record
 
-Purpose: remove a Personal Record that the user no longer wants (KB 6.9).
+Purpose: remove a Personal Record that the user no longer wants.
 
 Input: the Record to delete.
 

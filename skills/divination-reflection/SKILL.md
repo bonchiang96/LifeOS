@@ -8,8 +8,8 @@ compatibility: Requires the LifeOS Supabase functions in the lifeos schema and t
 
 ## 1. Purpose and when to use
 
-Divination & Reflection initially focuses on I Ching and Tarot (KB 8.1).
-It also owns the Storybook: Story Persons and Storylines (KB 8.8).
+Divination & Reflection initially focuses on I Ching and Tarot.
+It also owns the Storybook: Story Persons and Storylines.
 
 Use this Skill when the user:
 
@@ -39,22 +39,22 @@ The entry Skill [lifeos](../lifeos/SKILL.md) holds what every Module shares. Rea
 
 ## 3. Rules for every flow of this Module
 
-1. Preserve the user's account. Do not invent motives, causes, private facts or divination results (KB 3.2, 8.4).
-2. The user supplies the actual card draw or casting. The Agent never draws or casts for the user (KB 8.4).
-3. Reading Record, original Result, sourced Analysis and Reading Remark keep distinct business meanings (KB 8.7).
-4. A saved Reading or Analysis is never edited. It may be deleted and added again (KB 8.7).
-5. Story Persons are internal to this Module. Association with a LifeOS Subject is optional and needs user approval (KB 8.8).
-6. Divination stays usable without any Subject (KB 8.8).
-7. A user-reported third-party story is Storybook context. It is not automatically a Personal Event (KB 8.8, 10.4).
-8. A Divination Record or Reading never links to a Storyline. A relation between them goes in a Reading Remark (KB 8.9).
-9. Make a link directly when the user expresses it clearly. Ask the user when a link is ambiguous (KB 6.7).
+1. Preserve the user's account. Do not invent motives, causes, private facts or divination results.
+2. The user supplies the actual card draw or casting. The Agent never draws or casts for the user.
+3. Reading Record, original Result, sourced Analysis and Reading Remark keep distinct business meanings.
+4. A saved Reading or Analysis is never edited. It may be deleted and added again.
+5. Story Persons are internal to this Module. Association with a LifeOS Subject is optional and needs user approval.
+6. Divination stays usable without any Subject.
+7. A user-reported third-party story is Storybook context. It is not automatically a Personal Event.
+8. A Divination Record or Reading never links to a Storyline. A relation between them goes in a Reading Remark.
+9. Make a link directly when the user expresses it clearly. Ask the user when a link is ambiguous.
 10. Every save in this Module happens only after the user's approval.
-11. Adapt language, headings, length and format to the user. Do not freeze one output template (KB 8.5).
-12. Catalog identifiers such as TS-005 are for reference only. Never show them to the user (KB 8.2).
+11. Adapt language, headings, length and format to the user. Do not freeze one output template.
+12. Catalog identifiers such as TS-005 are for reference only. Never show them to the user.
 
 ## 4. Story intake and Story Persons
 
-Purpose: understand the user's Story and identify the people in it (KB 8.4, 8.8).
+Purpose: understand the user's Story and identify the people in it.
 
 ### Input
 
@@ -72,7 +72,7 @@ Purpose: understand the user's Story and identify the people in it (KB 8.4, 8.8)
 6. When no match exists, prepare a new Story Person for the later approved save (Section 6).
 7. When several persons are involved, call `storyline_search` with all their `story_person_ids`.
 8. Use `matched_person_ids` to tell shared, subgroup and individual Storylines apart.
-9. Distinguish directly shared developments from indirect personal background (KB 8.8).
+9. Distinguish directly shared developments from indirect personal background.
 10. Call `divination_search` with the confirmed `story_person_id` to recognize relevant earlier Readings.
 
 ### Choices and approvals
@@ -86,7 +86,7 @@ The Agent knows the confirmed Story Persons, the relevant Storylines and the rel
 
 ## 5. Storyline identity and timing
 
-Purpose: decide whether new information belongs to an existing Storyline or a new one (KB 8.8.1).
+Purpose: decide whether new information belongs to an existing Storyline or a new one.
 
 ### Input
 
@@ -116,11 +116,11 @@ Each planned change is one of three kinds:
 2. Corrected content that replaces incorrect content in a confirmed Storyline.
 3. A new Storyline for a different occurrence.
 
-Recorded Time is distinct from occurrence time. It does not establish the real-world chronology (KB 8.8.1).
+Recorded Time is distinct from occurrence time. It does not establish the real-world chronology.
 
 ## 6. Storybook save at the Story Context Cutoff
 
-Purpose: save Storybook updates at the right moment and only with approval (KB 8.8.2).
+Purpose: save Storybook updates at the right moment and only with approval.
 
 ### Input
 
@@ -133,29 +133,32 @@ Purpose: save Storybook updates at the right moment and only with approval (KB 8
    - The user returns to another Story.
    - The conversation moves to divination question preparation.
    - The conversation moves to another destination or activity.
-2. Present the relevant Story segment and the planned Storybook updates in friendly language.
-3. Ask the user's permission to save.
-4. On approval, call `story_person_create` for each new Story Person.
-5. Supply `subject_id` only when the user approved that Subject association.
-6. Call `story_person_update` for an approved change to an existing Story Person, including a new Subject association.
-7. Call `storyline_create` for each new Storyline, with its `story_person_ids` and known dates.
-8. Call `storyline_update` to add details or replace incorrect content in a confirmed Storyline.
-9. Keep distinct developments as distinct Storylines.
-10. When a Storyline and a Personal Event describe the same matter, link them with `record_link_create` (KB 8.8, 6.7).
-11. After the save, continue with Section 14 to offer a Reading Remark.
+   - The user signals the end of the conversation, such as with thanks or "that is all for now".
+2. When the conversation stops without an end signal, no cutoff occurs. Save nothing from that segment.
+3. Present the relevant Story segment and the planned Storybook updates in friendly language.
+4. Ask the user's permission to save.
+5. On approval, call `story_person_create` for each new Story Person.
+6. Supply `subject_id` only when the user approved that Subject association.
+7. Call `story_person_update` for an approved change to an existing Story Person, including a new Subject association.
+8. Call `storyline_create` for each new Storyline, with its `story_person_ids` and known dates.
+9. Call `storyline_update` to add details or replace incorrect content in a confirmed Storyline.
+10. Keep distinct developments as distinct Storylines.
+11. When a Storyline and a Personal Event describe the same matter, keep both and link them with `record_link_create`.
+12. After the save, continue with Section 14 to offer a Reading Remark.
 
 ### Choices and approvals
 
 - The user approves or declines the Storybook save.
 - When the user declines, save nothing from that segment.
+- An end signal leads to the same save question. The save still needs the user's approval.
 
 ### Outcome
 
-The approved Storylines and Story Persons are saved. A Storyline keeps only its latest correct content, without correction history (KB 8.8.1).
+The approved Storylines and Story Persons are saved. A Storyline keeps only its latest correct content, without correction history.
 
 ## 7. Question preparation and method selection
 
-Purpose: turn the user's concern into clear, copyable questions and a fitting method (KB 8.4).
+Purpose: turn the user's concern into clear, copyable questions and a fitting method.
 
 ### Input
 
@@ -176,7 +179,7 @@ Purpose: turn the user's concern into clear, copyable questions and a fitting me
 9. For I Ching, direct the user to the user-designated interface: https://i-ching-pro.vercel.app/app.html.
 10. For Tarot, continue with Section 8.
 11. Give each question as one independently copyable block where possible.
-12. Otherwise separate the complete questions vertically (KB 8.2).
+12. Otherwise separate the complete questions vertically.
 
 ### Choices and approvals
 
@@ -189,7 +192,7 @@ Each question has neutral first-person wording, a selected method and a copyable
 
 ## 8. Tarot Spread selection and template
 
-Purpose: give the user a fitting Spread and a copy-ready template for the draw (KB 8.2).
+Purpose: give the user a fitting Spread and a copy-ready template for the draw.
 
 ### Input
 
@@ -219,7 +222,7 @@ The user returns the filled template. The Agent associates each reported card wi
 
 ## 9. Tarot interpretation
 
-Purpose: interpret the user's draw against the question, the Spread and the Story (KB 8.5).
+Purpose: interpret the user's draw against the question, the Spread and the Story.
 
 ### Input
 
@@ -248,7 +251,7 @@ A complete Tarot interpretation. Continue with Section 11 to offer the save.
 
 ## 10. I Ching interpretation and optional 梅花易数
 
-Purpose: interpret the user's casting, then offer a deeper second round when useful (KB 8.6).
+Purpose: interpret the user's casting, then offer a deeper second round when useful.
 
 ### Input
 
@@ -276,6 +279,8 @@ Purpose: interpret the user's casting, then offer a deeper second round when use
 16. Complete the standard analysis before considering a second round.
 17. Offer an optional 梅花易数 interpretation when it is useful for the Question and first result.
 18. Useful areas are timing/应期, obstacles, future stages, opportunities or similar dynamics.
+19. Give the 梅花易数 interpretation as a second round of the same Reading.
+20. Keep it distinct from the standard I Ching interpretation. It becomes a second, separate Analysis of that Reading (Section 11).
 
 ### Choices and approvals
 
@@ -284,11 +289,11 @@ Purpose: interpret the user's casting, then offer a deeper second round when use
 
 ### Outcome
 
-A complete I Ching interpretation, with an optional 梅花易数 round. Continue with Section 11 to offer the save.
+A complete I Ching interpretation, with an optional 梅花易数 round for the same Reading. Continue with Section 11 to offer the save.
 
 ## 11. Reading save
 
-Purpose: save a completed divination session as one Divination Record (KB 8.7).
+Purpose: save a completed divination session as one Divination Record.
 
 ### Input
 
@@ -304,16 +309,19 @@ Purpose: save a completed divination session as one Divination Record (KB 8.7).
 3. On approval, extract and organize each original Question and Result.
 4. Keep the original Result text whole. Do not split hexagrams, lines, cards or Positions into separate items.
 5. Write each Analysis with `source`, Overall Outcome and Key Reasoning. A Reading may have one or more Analyses.
+   - For your own interpretation, set `source` to the name of your AI system.
+   - After a 梅花易数 round, put two Analyses in that Reading's `analyses`.
+   - One Analysis holds the standard I Ching interpretation. A second, separate Analysis holds the 梅花易数 interpretation.
 6. Key Reasoning explains how the interpretation of symbols relates to the Question and user context.
 7. Add Story Context only when the source actually discusses useful Story details.
 8. Put an Analysis shared by several Questions once in `record_analyses`. Do not repeat it under each Reading.
 9. Set each Reading's `story_person_ids` to its confirmed Story Persons.
 10. Call `divination_record_save` once for the session.
-11. A Reading's Subject is the Subject of its approved Story Persons (KB 8.9).
+11. A Reading's Subject is the Subject of its approved Story Persons.
     The Story Person's `subject_id` makes this connection. No separate Subject link call is needed.
-12. When the Reading corresponds to a Personal Event, link them with `record_link_create` (KB 8.9, 6.7).
+12. When the Reading corresponds to a Personal Event, link them with `record_link_create`.
 13. For a later additional or revised option, call `reading_create` on the existing Divination Record.
-14. Earlier distinct Readings stay unchanged (KB 8.4).
+14. Earlier distinct Readings stay unchanged.
 
 ### Choices and approvals
 
@@ -326,7 +334,7 @@ One Divination Record holds every Reading of the session, each with its original
 
 ## 12. Later Analyses, deletion and re-adding
 
-Purpose: keep Readings as the user gave them while allowing later sources and corrections (KB 8.7).
+Purpose: keep Readings as the user gave them while allowing later sources and corrections.
 
 ### Input
 
@@ -339,10 +347,11 @@ Purpose: keep Readings as the user gave them while allowing later sources and co
 2. Call `analysis_add` for a later Analysis from an outside AI, person or application.
 3. Record its authorship in `source`.
 4. Use `reading_id` for one Reading. Use `divination_record_id` alone for a combined Analysis.
-5. For a wrong saved Reading, call `reading_delete`, then `reading_create` with the correct content.
-6. For a wrong saved Analysis, call `analysis_delete`, then `analysis_add` with the correct content.
-7. To delete a whole session, call `divination_record_delete`.
-8. `divination_record_update` changes only the title, topic, session date or metadata.
+5. A 梅花易数 round for an already saved Reading is also a second, separate Analysis. Call `analysis_add` with that `reading_id`.
+6. For a wrong saved Reading, call `reading_delete`, then `reading_create` with the correct content.
+7. For a wrong saved Analysis, call `analysis_delete`, then `analysis_add` with the correct content.
+8. To delete a whole session, call `divination_record_delete`.
+9. `divination_record_update` changes only the title, topic, session date or metadata.
 
 ### Choices and approvals
 
@@ -350,11 +359,11 @@ Purpose: keep Readings as the user gave them while allowing later sources and co
 
 ### Outcome
 
-The original Reading and earlier Analyses stay unchanged. Timeline shows later Analyses under the original Reading Date (KB 8.7, 10.2).
+The original Reading and earlier Analyses stay unchanged. Timeline shows later Analyses under the original Reading Date.
 
 ## 13. Past Reading retrieval
 
-Purpose: let the user recognize a past Reading quickly (KB 8.7).
+Purpose: let the user recognize a past Reading quickly.
 
 ### Input
 
@@ -377,7 +386,7 @@ The user sees the short view first and the full view on request.
 
 ## 14. Reading Story Persons and follow-up Remarks
 
-Purpose: connect real-world developments to earlier Readings (KB 8.9).
+Purpose: connect real-world developments to earlier Readings.
 
 ### Input
 
@@ -407,11 +416,11 @@ Purpose: connect real-world developments to earlier Readings (KB 8.9).
 
 ### Outcome
 
-The Reading Remark explains the correspondence. The original Reading and sourced Analysis stay unchanged. A Remark change and a Story Person change are not edits (KB 6.9, 8.9).
+The Reading Remark explains the correspondence. The original Reading and sourced Analysis stay unchanged. A Remark change and a Story Person change are not edits. They leave the Reading's updated time unchanged.
 
 ## 15. Canonical Tarot Spread Catalog
 
-The Tarot Spread Library is authoritative for Spread selection (KB 8.2). Source: Approved Tarot Spread Library, https://docs.google.com/document/d/1WFS08q80T2fQuh1f9PFmyGWET8K-hFqYhskyhTRLU8Y/edit.
+The Tarot Spread Library is authoritative for Spread selection. Source: Approved Tarot Spread Library, https://docs.google.com/document/d/1WFS08q80T2fQuh1f9PFmyGWET8K-hFqYhskyhTRLU8Y/edit.
 The catalog holds seven Spreads and 30 numbered Positions. Repeated source meanings stay as separate numbered Positions.
 The identifiers TS-001 to TS-007 are for reference only. Show the Spread name without them.
 

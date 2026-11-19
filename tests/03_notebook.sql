@@ -10,6 +10,7 @@
 --   6. notebook_list_keyword_and_order
 --   7. notebook_note_types_seed_holds_five_default_note_types
 --   8. notebook_note_types_created_on_read_starts_with_five_default_note_types
+--   9. notebook_language_modes_and_platforms_start_empty_with_catalog_names
 --
 -- Test setup that the Contract has no function for: test 8 deletes the seeded note_types
 -- row, so the first read creates it. The rollback restores the row.
@@ -197,6 +198,26 @@ begin
   perform pg_temp.chk(r->>'name' = 'Note Types', 'created name is Note Types, got ' || (r->>'name'));
   perform pg_temp.chk(r->>'content' = E'Idea\nFeeling\nExperience\nExplanation\nGeneral', 'created content is the five Note Types, got "' || (r->>'content') || '"');
   perform pg_temp.chk(string_to_array(r->>'content', E'\n') = array['Idea','Feeling','Experience','Explanation','General'], 'one Note Type per line, in order');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 9. language_modes and platforms are catalog Notebooks that start empty (M-0023 D12) --
+do $t$
+declare t constant text := 'notebook_language_modes_and_platforms_start_empty_with_catalog_names';
+  k text; expected_name text; r jsonb; r2 jsonb;
+begin
+  foreach k in array array['language_modes','platforms'] loop
+    expected_name := case k when 'language_modes' then 'Language Modes' else 'Platforms' end;
+    r := lifeos.notebook_read(k);
+    perform pg_temp.chk((r->>'initialised')::boolean, k || ': first read initialises');
+    perform pg_temp.chk(r->>'name' = expected_name, k || ': catalog name is ' || expected_name || ', got ' || (r->>'name'));
+    perform pg_temp.chk(r->>'content' = '', k || ': a new Notebook starts empty, got "' || (r->>'content') || '"');
+    r2 := lifeos.notebook_read(k, 'Ignored Name');
+    perform pg_temp.chk(not (r2->>'initialised')::boolean and r2->>'name' = expected_name, k || ': second read returns the Notebook unchanged');
+  end loop;
+  r := lifeos.notebook_update('platforms', '{"content":"whatsapp\nemail"}');
+  perform pg_temp.chk(r->>'name' = 'Platforms' and r->>'content' = E'whatsapp\nemail', 'platforms content is replaced and keeps its catalog name');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

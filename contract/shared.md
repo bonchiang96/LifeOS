@@ -163,6 +163,7 @@ This Contract tells a LifeOS AI Agent how to read and write LifeOS data. The Age
 | Save a Storyline or a Story Person | `storyline_create`, `story_person_create` | [divination-reflection.md](divination-reflection.md) |
 | Draft a message for someone | `communication_profile_search`, then `communication_runtime_context` | [communication-assistant.md](communication-assistant.md) |
 | Finish a message | `communication_message_finalize` | [communication-assistant.md](communication-assistant.md) |
+| Merge two Person Profiles of one person | `communication_profile_merge`, before `subject_merge` | [communication-assistant.md](communication-assistant.md) |
 | Remember a learned rule or habit | `memory_create`; recall: `memory_search` | [lifeos-memory.md](lifeos-memory.md) |
 | Use a vocabulary or default value | `notebook_read` | [notebook.md](notebook.md) |
 
@@ -418,7 +419,7 @@ Derived fields: `person_profile_id` ([communication-assistant.md 8.1](communicat
 1. Both Subjects are active and different.
 2. The function moves every reference from `merge_id` to `keep_id`: Record links, `observation.subject_id`, the Expense Subject fields, `story_person.subject_id` and `communication_profile.person_subject_id`.
 3. A Record link that becomes a duplicate pair is removed.
-4. When both Subjects have an active Person Profile, the function returns "invalid relationship". The user resolves the two Profiles first.
+4. When both Subjects have an active Person Profile, the function returns "invalid relationship". The user resolves the two Profiles first, and the Agent moves the Rules and Message History with [communication-assistant.md 8.1.8](communication-assistant.md#818-communication_profile_merge).
 5. When `merge_id` has `is_user = true`, `keep_id` becomes the user Subject.
 6. The function sets `merged_into_id = keep_id` and `deleted_at` on the merged Subject. Its own fields stay stored.
 7. Source Records stay unchanged except for their Subject references.

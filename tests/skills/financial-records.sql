@@ -18,6 +18,9 @@
 --   11. purchase_with_received_refund_user_still_deletes_with_refunds
 --   12. spending_report_fixed_order_per_currency_with_refund_explanation
 --   13. money_coming_in_is_observation_or_event_not_expense
+--   14. purchase_several_refunds_none_received_deleted_with_all_refunds
+--   15. purchase_several_refunds_wrong_detail_keeps_received_deletes_not_received
+--   16. purchase_several_refunds_some_received_user_still_deletes_all
 --
 -- Single transaction: begin; tests; select results; rollback.
 -- Fixture text starts with SKT_ and business dates lie in 2032, unless a flow needs today
@@ -492,6 +495,88 @@ begin
   -- outcome: Financial Records hold no income
   perform pg_temp.chk((lifeos.expense_search('{"from_date": "2032-12-01", "to_date": "2032-12-31"}'::jsonb) ->> 'returned_count')::integer = 0, 'no Expense for income');
   perform pg_temp.chk(lifeos.expense_spending_report('{"from_date": "2032-12-01", "to_date": "2032-12-31"}'::jsonb) -> 'currencies' = '[]'::jsonb, 'the report is empty for the month');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 14. Section 12 branch with several Refunds: no Refund money was received; the purchase goes with all its Refunds ---
+do $t$
+declare t constant text := 'purchase_several_refunds_none_received_deleted_with_all_refunds';
+  pm uuid := pg_temp.mk_subject('SKT_F14 Card', 'payment method'); p jsonb; r1 jsonb; r2 jsonb; r3 jsonb; rd jsonb; d jsonb;
+begin
+  p := pg_temp.mk_expense('2032-08-15', pm, 300, 'SKT_F14 Lazada', 'household');
+  r1 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 40, 'transaction_date', '2032-08-16', 'line_type', 'item'));
+  r2 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 10, 'transaction_date', '2032-08-17', 'line_type', 'charge'));
+  r3 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 50, 'transaction_date', '2032-08-18', 'line_type', 'adjustment'));
+  -- input: the active Refunds from the refunds field
+  rd := lifeos.expense_read((p ->> 'id')::uuid);
+  perform pg_temp.chk((select array_agg(x ->> 'id' order by o) from jsonb_array_elements(rd -> 'refunds') with ordinality y(x, o)) = array[r1 ->> 'id', r2 ->> 'id', r3 ->> 'id'], 'the refunds field lists the three Refunds in date order');
+  -- step 1: for each of the three Refunds the user answers that its money was not received (Agent step)
+  -- step 2: the Agent states that deleting the purchase deletes all its Refunds (Agent step)
+  -- step 3: after the user confirms
+  d := lifeos.expense_delete((p ->> 'id')::uuid, 'SKT_F14 the order was cancelled and none of the three refunds came back');
+  perform pg_temp.chk(d -> 'deleted_refund_ids' = jsonb_build_array(r1 ->> 'id', r2 ->> 'id', r3 ->> 'id'), 'all three Refunds go with the purchase');
+  perform pg_temp.chk(lifeos.expense_read((r1 ->> 'id')::uuid) ->> 'deleted_at' = d ->> 'deleted_at' and lifeos.expense_read((r2 ->> 'id')::uuid) ->> 'deleted_at' = d ->> 'deleted_at'
+                      and lifeos.expense_read((r3 ->> 'id')::uuid) ->> 'deleted_at' = d ->> 'deleted_at', 'each Refund has the deletion time of the purchase');
+  perform pg_temp.chk((lifeos.expense_search(jsonb_build_object('refund_of', p ->> 'id')) ->> 'returned_count')::integer = 0, 'no active Refund of the purchase is left');
+  perform pg_temp.chk(lifeos.expense_spending_report('{"from_date": "2032-08-14", "to_date": "2032-08-20"}'::jsonb) -> 'currencies' = '[]'::jsonb, 'neither the purchase nor a Refund is counted');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 15. Section 12 branch with several Refunds: some money received, a purchase detail was wrong ----------------
+-- Step 5: keep each received Refund, delete each Refund without received money with its reason, then correct.
+do $t$
+declare t constant text := 'purchase_several_refunds_wrong_detail_keeps_received_deletes_not_received';
+  pm uuid := pg_temp.mk_subject('SKT_F15 Card', 'payment method'); p jsonb; r1 jsonb; r2 jsonb; r3 jsonb; d3 jsonb; c jsonb; rd jsonb; h jsonb; rep jsonb;
+begin
+  p := pg_temp.mk_expense('2032-08-22', pm, 300, 'SKT_F15 Courts', 'electronics');
+  r1 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 100, 'transaction_date', '2032-08-23', 'line_type', 'item'));
+  r2 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 50, 'transaction_date', '2032-08-24', 'line_type', 'item'));
+  r3 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 120, 'transaction_date', '2032-08-25', 'line_type', 'adjustment'));
+  perform pg_temp.chk(jsonb_array_length(lifeos.expense_read((p ->> 'id')::uuid) -> 'refunds') = 3, 'input: three active Refunds');
+  -- step 1: the money of r1 and r2 was received, the money of r3 never came (Agent step)
+  -- step 4: the purchase really happened; the user says the price was RM200, not RM300 (Agent step)
+  -- Contract guard (financial-records.md 6.5 item 9), not a Skill step: with r3 still active the correction breaks the Refund limit
+  perform pg_temp.expect_err(format($$select lifeos.expense_update(%s, '{"expense_total": 200, "correction_reason": "SKT_F15 x"}'::jsonb)$$, pg_temp.q((p ->> 'id')::uuid)), 'invalid input');
+  -- step 5.2: delete the Refund without received money, with the reason
+  d3 := lifeos.expense_delete((r3 ->> 'id')::uuid, 'SKT_F15 this refund money was never received');
+  perform pg_temp.chk(d3 ->> 'deleted_at' is not null and d3 -> 'deleted_refund_ids' = '[]'::jsonb, 'only that Refund is deleted');
+  h := lifeos.expense_history((r3 ->> 'id')::uuid);
+  perform pg_temp.chk(h -> 'history' -> (jsonb_array_length(h -> 'history') - 1) ->> 'correction_reason' = 'SKT_F15 this refund money was never received', 'the reason is in the Refund history');
+  -- step 5.3: correct the purchase under Section 10; the kept Refunds stay within its limits
+  c := lifeos.expense_update((p ->> 'id')::uuid, jsonb_build_object('expense_total', 200, 'correction_reason', 'SKT_F15 the price was RM200, not RM300',
+         'lines', jsonb_build_array(jsonb_build_object('line_type', 'item', 'item_description', 'SKT_F15 rice cooker', 'unit_price', 200, 'line_total', 200, 'category', 'electronics'))));
+  perform pg_temp.chk((c ->> 'expense_total')::numeric = 200 and c ->> 'deleted_at' is null, 'the purchase is corrected, not deleted');
+  -- outcome
+  rd := lifeos.expense_read((p ->> 'id')::uuid);
+  perform pg_temp.chk((select array_agg(x ->> 'id' order by o) from jsonb_array_elements(rd -> 'refunds') with ordinality y(x, o)) = array[r1 ->> 'id', r2 ->> 'id'], 'the purchase keeps both received Refunds, got ' || (rd -> 'refunds')::text);
+  perform pg_temp.chk(lifeos.expense_read((r1 ->> 'id')::uuid) ->> 'deleted_at' is null and lifeos.expense_read((r2 ->> 'id')::uuid) ->> 'deleted_at' is null
+                      and lifeos.expense_read((r3 ->> 'id')::uuid) ->> 'deleted_at' is not null, 'received Refunds stay active, the other is deleted');
+  h := lifeos.expense_history((p ->> 'id')::uuid);
+  perform pg_temp.chk(h -> 'history' -> (jsonb_array_length(h -> 'history') - 1) ->> 'correction_reason' = 'SKT_F15 the price was RM200, not RM300', 'the correction reason is in the purchase history');
+  rep := pg_temp.cblock(lifeos.expense_spending_report('{"from_date": "2032-08-21", "to_date": "2032-08-31"}'::jsonb), pg_temp.cur());
+  perform pg_temp.chk((pg_temp.part(rep, 'total_spent') ->> 'total')::numeric = 50, 'the total is 200 - 100 - 50, got ' || coalesce(pg_temp.part(rep, 'total_spent') ->> 'total', '<none>'));
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 16. Section 12 branch with several Refunds: some money received, the user still wants deletion ---------------
+do $t$
+declare t constant text := 'purchase_several_refunds_some_received_user_still_deletes_all';
+  pm uuid := pg_temp.mk_subject('SKT_F16 Card', 'payment method'); p jsonb; r1 jsonb; r2 jsonb; d jsonb;
+begin
+  p := pg_temp.mk_expense('2032-07-20', pm, 150, 'SKT_F16 Shopee', 'clothing');
+  r1 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 30, 'transaction_date', '2032-07-21', 'line_type', 'item'));
+  r2 := lifeos.expense_refund_create(jsonb_build_object('refund_of', p ->> 'id', 'refund_amount', 20, 'transaction_date', '2032-07-22', 'line_type', 'item'));
+  perform pg_temp.chk(jsonb_array_length(lifeos.expense_read((p ->> 'id')::uuid) -> 'refunds') = 2, 'input: two active Refunds');
+  -- step 1: the money of r1 was received, the money of r2 was not (Agent step)
+  -- step 4: the purchase really happened; the Agent asks why; the user still wants it deleted (Agent step)
+  -- step 6: after the user confirms, the purchase and all its Refunds are deleted
+  d := lifeos.expense_delete((p ->> 'id')::uuid, 'SKT_F16 the user does not want this purchase in the records');
+  perform pg_temp.chk(d -> 'deleted_refund_ids' = jsonb_build_array(r1 ->> 'id', r2 ->> 'id'), 'the received and the not received Refund go with the purchase');
+  perform pg_temp.chk((lifeos.expense_search('{"keyword": "SKT_F16 Shopee"}'::jsonb) ->> 'returned_count')::integer = 0, 'no active Expense of the purchase is left');
+  perform pg_temp.chk(lifeos.expense_spending_report('{"from_date": "2032-07-18", "to_date": "2032-07-31"}'::jsonb) -> 'currencies' = '[]'::jsonb, 'neither the purchase nor a Refund is counted');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

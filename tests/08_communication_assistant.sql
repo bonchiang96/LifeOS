@@ -16,11 +16,18 @@
 --   11. message_history_search_read_delete
 --   12. profile_delete_stops_rules_keeps_history
 --   13. profile_and_message_search_filter_by_deleted_record_id_matches_nothing
+--   14. profile_merge_moves_rules_and_message_history_and_deletes_merged_profile
+--   15. profile_merge_rule_conflict_moves_nothing
+--   16. profile_merge_rejects_group_and_audience_profiles
+--   17. profile_merge_rejects_same_profile_twice
+--   18. profile_merge_not_found_deleted_and_invalid_input
 --
 -- A fixture block between tests 4 and 5 builds the Profiles and Rules that tests 5 to 7 resolve.
 -- Test setup that the Contract has no function for: tests 10 and 11 move
 -- finalized_at of saved messages into the past, so newest-first order can be
--- told apart inside a single transaction. Every other step calls Contract functions only.
+-- told apart inside a single transaction. Test 14 reads lifeos.communication_messages to
+-- check the stored profile_id of a moved deleted message, which no Contract return shows.
+-- Every other step calls Contract functions only.
 -- Single transaction: begin; tests; select results; rollback.
 -- =============================================================================
 begin;
@@ -452,6 +459,145 @@ begin
   perform pg_temp.chk((lifeos.communication_profile_search('{"keyword":"d10-person","include_deleted":true}')->>'returned_count')::int = 1, 'the Profile stays findable by keyword with include_deleted');
   perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', pf))->>'returned_count')::int = 0, 'profile_id of a deleted Profile matches nothing');
   perform pg_temp.chk((lifeos.communication_message_history_search('{"keyword":"xqd10"}')->>'returned_count')::int = 1, 'the message stays findable by keyword');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 14. Profile merge: Rules and Message History move to the kept Profile, the emptied Profile is deleted (M-0023 D5)
+do $t$
+declare t constant text := 'profile_merge_moves_rules_and_message_history_and_deletes_merged_profile';
+  s_keep uuid := pg_temp.mk_subject('Merge keep person'); s_merge uuid := pg_temp.mk_subject('Merge duplicate person');
+  keep uuid; dup uuid; r_n jsonb; r_zh jsonb; m1 jsonb; m2 jsonb; m3 jsonb; res jsonb; st jsonb; e text;
+begin
+  keep := pg_temp.mk_profile('merge-keep', 'person', s_keep);
+  dup := pg_temp.mk_profile('merge-dup', 'person', s_merge);
+  -- keep_id has an en Rule. merge_id has the same dimension and rule_key as neutral and zh, so nothing conflicts.
+  perform pg_temp.rule(keep, 'en', 'tone', 'greeting', 'keep greeting en');
+  r_n := pg_temp.rule(dup, null, 'tone', 'greeting', 'dup greeting neutral');
+  r_zh := pg_temp.rule(dup, 'zh', 'tone', 'greeting', 'dup greeting zh');
+  perform lifeos.communication_message_finalize(jsonb_build_object('profile_id', keep, 'message_text', 'keep message xqmerge'));
+  m1 := lifeos.communication_message_finalize(jsonb_build_object('profile_id', dup, 'message_text', 'dup message one xqmerge', 'language_mode', 'zh', 'platform', 'whatsapp'))->'message';
+  m2 := lifeos.communication_message_finalize(jsonb_build_object('profile_id', dup, 'message_text', 'dup message two xqmerge'))->'message';
+  m3 := lifeos.communication_message_finalize(jsonb_build_object('profile_id', dup, 'message_text', 'dup deleted message xqmerge'))->'message';
+  perform lifeos.communication_message_history_delete((m3->>'id')::uuid);
+
+  res := lifeos.communication_profile_merge(jsonb_build_object('keep_id', keep, 'merge_id', dup));
+  perform pg_temp.chk(res->'profile'->>'id' = keep::text and res->'profile'->>'person_subject_id' = s_keep::text, 'the result holds the complete kept Profile');
+  perform pg_temp.chk(res->>'merged_id' = dup::text and res->>'deleted_at' is not null, 'the result names the merged Profile and its deleted_at');
+  perform pg_temp.chk((res->'moved'->>'rules')::int = 2, 'two Rules moved, got ' || coalesce(res->'moved'->>'rules', '<none>'));
+  perform pg_temp.chk((res->'moved'->>'messages')::int = 3, 'three messages moved, the deleted one included, got ' || coalesce(res->'moved'->>'messages', '<none>'));
+  -- the moved Rules belong to the kept Profile and keep their text and language_mode
+  st := lifeos.communication_rule_state(keep, 'zh');
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(st->'rules') r where r->>'id' = r_zh->>'id' and r->>'scope' = 'profile' and r->>'source_profile_id' = keep::text and r->>'language_mode' = 'zh' and r->>'rule_text' = 'dup greeting zh'), 'the zh Rule is now a Rule of the kept Profile');
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(st->'rules') r where r->>'id' = r_n->>'id' and r->>'scope' = 'profile' and r->>'language_mode' is null), 'the neutral Rule is now a Rule of the kept Profile');
+  perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(keep, 'en'), 'tone', 'greeting') = 'keep greeting en', 'the kept en Rule still wins under en');
+  perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(keep, 'zh'), 'tone', 'greeting') = 'dup greeting zh', 'the moved zh Rule applies to the kept Profile under zh');
+  -- the active Message History belongs to the kept Profile
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', keep, 'keyword', 'xqmerge'))->>'returned_count')::int = 3, 'the kept Profile has its own message and the two moved active messages');
+  perform pg_temp.chk(lifeos.communication_message_history_read((m1->>'id')::uuid)->>'profile_id' = keep::text, 'a moved message reads with the kept profile_id');
+  perform pg_temp.chk(lifeos.communication_message_history_read((m1->>'id')::uuid)->>'platform' = 'whatsapp' and lifeos.communication_message_history_read((m1->>'id')::uuid)->>'finalized_at' = m1->>'finalized_at', 'a moved message keeps its other fields');
+  perform pg_temp.chk(lifeos.communication_runtime_context(keep, 'zh')->'recent_messages'->0->>'id' = m1->>'id', 'the moved zh message is a recent example for the kept Profile');
+  -- the deleted message moved and stays deleted (direct read: no Contract return shows its stored profile_id)
+  perform pg_temp.chk((select profile_id from lifeos.communication_messages where id = (m3->>'id')::uuid) = keep, 'the deleted message is stored with the kept profile_id');
+  perform pg_temp.chk(lifeos.communication_message_history_read((m3->>'id')::uuid)->>'deleted_at' is not null, 'the moved deleted message keeps its deleted_at');
+  -- the emptied Profile is deleted
+  perform pg_temp.chk(lifeos.communication_profile_read(dup)->>'deleted_at' = res->>'deleted_at', 'the merged Profile is deleted');
+  e := pg_temp.err_of(format('select lifeos.communication_rule_state(%s)', pg_temp.q(dup)));
+  perform pg_temp.chk(e = 'record deleted', 'the merged Profile no longer resolves Rules, got ' || coalesce(e, '<no error>'));
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', dup))->>'returned_count')::int = 0, 'no message is left on the merged Profile');
+  -- the D5 flow continues: the two Subjects now merge
+  perform pg_temp.chk(lifeos.subject_read(s_merge)->>'person_profile_id' is null, 'the duplicate Subject has no Person Profile after the merge');
+  res := lifeos.subject_merge(jsonb_build_object('keep_id', s_keep, 'merge_id', s_merge, 'identity', jsonb_build_object('name', 'Merge keep person')));
+  perform pg_temp.chk(res->'subject'->>'person_profile_id' = keep::text, 'subject_merge succeeds and the kept Subject keeps the kept Profile');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 15. Profile merge: a Rule on both Profiles with the same language_mode, dimension and rule_key moves nothing
+do $t$
+declare t constant text := 'profile_merge_rule_conflict_moves_nothing';
+  keep uuid := pg_temp.mk_profile('conflict-keep', 'person', pg_temp.mk_subject('Conflict keep person'));
+  dup uuid := pg_temp.mk_profile('conflict-dup', 'person', pg_temp.mk_subject('Conflict duplicate person'));
+  r_free jsonb; e text; d text;
+begin
+  perform pg_temp.rule(keep, null, 'tone', 'greeting', 'keep greeting');
+  perform pg_temp.rule(dup, null, 'tone', 'greeting', 'dup greeting');
+  r_free := pg_temp.rule(dup, null, 'style', 'length', 'dup length');
+  perform lifeos.communication_message_finalize(jsonb_build_object('profile_id', dup, 'message_text', 'conflict message xqconflict'));
+  -- a neutral Rule on both Profiles is a conflict: null language_mode matches null
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', keep, 'merge_id', dup)), 'invalid relationship');
+  begin
+    perform lifeos.communication_profile_merge(jsonb_build_object('keep_id', keep, 'merge_id', dup));
+  exception when others then
+    get stacked diagnostics d = pg_exception_detail;
+  end;
+  perform pg_temp.chk(d like '%neutral/tone/greeting%' and d not like '%length%', 'the detail names the conflicting Rule only, got ' || coalesce(d, '<none>'));
+  -- nothing moved and nothing was deleted
+  perform pg_temp.chk(lifeos.communication_profile_read(dup)->>'deleted_at' is null, 'the duplicate Profile stays active');
+  perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(dup, null), 'style', 'length') = 'dup length', 'the non-conflicting Rule stays on the duplicate Profile');
+  perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(dup, null), 'tone', 'greeting') = 'dup greeting', 'the conflicting Rule stays on the duplicate Profile');
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(lifeos.communication_rule_state(keep, null)->'rules') r where r->>'scope' = 'profile' and r->>'rule_key' = 'length'), 'the kept Profile received no Rule');
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', dup, 'keyword', 'xqconflict'))->>'returned_count')::int = 1, 'the message stays on the duplicate Profile');
+  -- the same conflict under one Language Mode
+  perform pg_temp.rule(keep, 'zh', 'style', 'emoji', 'keep emoji zh');
+  perform pg_temp.rule(dup, 'zh', 'style', 'emoji', 'dup emoji zh');
+  perform lifeos.communication_rule_delete((select (r->>'id')::uuid from jsonb_array_elements(lifeos.communication_rule_state(dup, null)->'rules') r where r->>'scope' = 'profile' and r->>'rule_key' = 'greeting'));
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', keep, 'merge_id', dup)), 'invalid relationship');
+  -- after the Agent resolves the last conflict with the user, the merge succeeds
+  perform lifeos.communication_rule_delete((select (r->>'id')::uuid from jsonb_array_elements(lifeos.communication_rule_state(dup, 'zh')->'rules') r where r->>'scope' = 'profile' and r->>'rule_key' = 'emoji'));
+  perform pg_temp.chk((lifeos.communication_profile_merge(jsonb_build_object('keep_id', keep, 'merge_id', dup))->'moved'->>'rules')::int = 1, 'after the conflicts are resolved, the merge moves the remaining Rule');
+  perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(keep, null), 'style', 'length') = 'dup length', 'the remaining Rule now applies to the kept Profile');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 16. Profile merge: only Person Profiles merge ------------------------------------------------------------------
+do $t$
+declare t constant text := 'profile_merge_rejects_group_and_audience_profiles';
+  person uuid := pg_temp.mk_profile('type-person', 'person', pg_temp.mk_subject('Type check person'));
+  grp uuid := pg_temp.mk_profile('type-group', 'group'); aud uuid := pg_temp.mk_profile('type-audience', 'audience');
+begin
+  perform lifeos.communication_message_finalize(jsonb_build_object('profile_id', grp, 'message_text', 'group message xqtype'));
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', person, 'merge_id', grp)), 'invalid relationship');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', person, 'merge_id', aud)), 'invalid relationship');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', grp, 'merge_id', person)), 'invalid relationship');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', aud, 'merge_id', person)), 'invalid relationship');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', grp, 'merge_id', aud)), 'invalid relationship');
+  perform pg_temp.chk(lifeos.communication_profile_read(person)->>'deleted_at' is null and lifeos.communication_profile_read(grp)->>'deleted_at' is null
+                      and lifeos.communication_profile_read(aud)->>'deleted_at' is null, 'no Profile is deleted');
+  perform pg_temp.chk((lifeos.communication_message_history_search(jsonb_build_object('profile_id', grp, 'keyword', 'xqtype'))->>'returned_count')::int = 1, 'the Group message stays on the Group Profile');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 17. Profile merge: keep_id and merge_id differ -----------------------------------------------------------------
+do $t$
+declare t constant text := 'profile_merge_rejects_same_profile_twice';
+  person uuid := pg_temp.mk_profile('same-person', 'person', pg_temp.mk_subject('Same profile person'));
+begin
+  perform pg_temp.rule(person, null, 'tone', 'greeting', 'same greeting');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', person, 'merge_id', person)), 'invalid relationship');
+  perform pg_temp.chk(lifeos.communication_profile_read(person)->>'deleted_at' is null, 'the Profile stays active');
+  perform pg_temp.chk(pg_temp.eff(lifeos.communication_resolve(person, null), 'tone', 'greeting') = 'same greeting', 'the Profile keeps its Rule');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 18. Profile merge: unknown and deleted Profiles, invalid input -------------------------------------------------
+do $t$
+declare t constant text := 'profile_merge_not_found_deleted_and_invalid_input';
+  person uuid := pg_temp.mk_profile('nf-person', 'person', pg_temp.mk_subject('Not found person'));
+  gone uuid := pg_temp.mk_profile('nf-deleted', 'person', pg_temp.mk_subject('Deleted profile merge person'));
+begin
+  perform lifeos.communication_profile_delete(gone);
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(jsonb_build_object(''keep_id'', gen_random_uuid(), ''merge_id'', %s))', pg_temp.q(person)), 'record not found');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(jsonb_build_object(''keep_id'', %s, ''merge_id'', gen_random_uuid()))', pg_temp.q(person)), 'record not found');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', gone, 'merge_id', person)), 'record deleted');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', person, 'merge_id', gone)), 'record deleted');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', person)), 'invalid input');
+  perform pg_temp.expect_err($$select lifeos.communication_profile_merge('{"keep_id":"not-a-uuid","merge_id":"also-not"}')$$, 'invalid input');
+  perform pg_temp.expect_err(format('select lifeos.communication_profile_merge(%L::jsonb)', jsonb_build_object('keep_id', person, 'merge_id', gone, 'bogus', 1)), 'unsupported field');
+  perform pg_temp.chk(lifeos.communication_profile_read(person)->>'deleted_at' is null, 'the active Profile stays active');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

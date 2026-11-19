@@ -11,16 +11,16 @@ The tests call only functions of the schema `lifeos`. Error tests compare the ex
 | File | Module | Contract file and chapter | Tests |
 |---|---|---|---|
 | `02_memory.sql` | LifeOS Memory | lifeos-memory.md 2 | 5 |
-| `03_notebook.sql` | Notebook | notebook.md 3 | 8 |
+| `03_notebook.sql` | Notebook | notebook.md 3 | 9 |
 | `04_personal_records.sql` | Personal Records | personal-records.md 4.1 to 4.4, shared.md 4.5 and 4.6 | 23 |
 | `05_subject.sql` | Subject | shared.md 5 | 9 |
 | `06_financial_records.sql` | Financial Records | financial-records.md 6 | 19 |
 | `07_divination_reflection.sql` | Divination & Reflection | divination-reflection.md 7 | 17 |
-| `08_communication_assistant.sql` | Communication Assistant | communication-assistant.md 8 | 13 |
+| `08_communication_assistant.sql` | Communication Assistant | communication-assistant.md 8 | 18 |
 | `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | shared.md 9 | 11 |
 | `10_qa_regression.sql` | QA regression of M-0021 D4 to D10 and M-0022 D4 | shared.md 1, 4.5, 4.6, 5 and 9; personal-records.md 4.1 to 4.4; financial-records.md 6; divination-reflection.md 7; communication-assistant.md 8 | 103 |
 
-Total: 208 tests in 9 files.
+Total: 214 tests in 9 files.
 
 ## How each file works
 
@@ -53,6 +53,7 @@ Some setups use a direct read, `update` or `delete` because the Contract has no 
 7. `07_divination_reflection.sql`, tests 13, 14 and 15, each move `updated_at` of one Reading. A transaction has one clock value, so only this shows that `updated_at` stays unchanged. The three changes are a Reading Remark removal, a Story Person change and a Reading Remark change.
 8. `04_personal_records.sql`, test 20, reads `lifeos.events`. This shows that the stored `schedule_id` of a deleted Event is cleared.
 9. `10_qa_regression.sql`: `qa_d5_5` reads `lifeos.record_links`, `qa_d9_3` and `qa_d9_7` read `lifeos.events`, and `qa_d9_6` reads `lifeos.schedules`. These reads check stored values that no Contract return shows.
+10. `08_communication_assistant.sql`, test 14, reads `lifeos.communication_messages`. This shows that a deleted message moves to the kept Profile in a Profile merge.
 
 ## Coverage
 
@@ -71,6 +72,7 @@ Some setups use a direct read, `update` or `delete` because the Contract has no 
 | Notebook catalog list | `notebook_list_keyword_and_order` | `03_notebook.sql` |
 | Seeded `note_types` Notebook holds five Note Types | `notebook_note_types_seed_holds_five_default_note_types` | `03_notebook.sql` |
 | New `note_types` Notebook starts with five Note Types | `notebook_note_types_created_on_read_starts_with_five_default_note_types` | `03_notebook.sql` |
+| `language_modes` and `platforms` Notebooks start empty with their catalog names | `notebook_language_modes_and_platforms_start_empty_with_catalog_names` | `03_notebook.sql` |
 | Schedule create | `schedule_create_defaults_and_validation` | `04_personal_records.sql` |
 | Schedule series, create and extend | `schedule_series_create_and_extend` | `04_personal_records.sql` |
 | Schedule "this one" | `schedule_update_this_one_only` | `04_personal_records.sql` |
@@ -152,6 +154,11 @@ Some setups use a direct read, `update` or `delete` because the Contract has no 
 | Message history | `message_history_search_read_delete` | `08_communication_assistant.sql` |
 | Profile delete | `profile_delete_stops_rules_keeps_history` | `08_communication_assistant.sql` |
 | Profile and message search by a deleted Record ID | `profile_and_message_search_filter_by_deleted_record_id_matches_nothing` | `08_communication_assistant.sql` |
+| Profile merge moves Rules and Message History, then deletes the merged Profile | `profile_merge_moves_rules_and_message_history_and_deletes_merged_profile` | `08_communication_assistant.sql` |
+| Profile merge with a Rule conflict moves nothing | `profile_merge_rule_conflict_moves_nothing` | `08_communication_assistant.sql` |
+| Profile merge of a Group or Audience Profile | `profile_merge_rejects_group_and_audience_profiles` | `08_communication_assistant.sql` |
+| Profile merge of one Profile with itself | `profile_merge_rejects_same_profile_twice` | `08_communication_assistant.sql` |
+| Profile merge with an unknown or deleted Profile, or invalid input | `profile_merge_not_found_deleted_and_invalid_input` | `08_communication_assistant.sql` |
 | Timeline, every Record Type | `timeline_includes_every_record_type_with_module` | `09_timeline_shared_retrieval.sql` |
 | Timeline with Subjects on items | `timeline_items_carry_connected_subjects` | `09_timeline_shared_retrieval.sql` |
 | Timeline without Storylines and deleted Records | `timeline_excludes_storylines_deleted_and_reference_data` | `09_timeline_shared_retrieval.sql` |
