@@ -1,5 +1,5 @@
 -- =============================================================================
--- tests/07_divination_reflection.sql -- Module: Divination & Reflection (Contract Chapter 7)
+-- tests/07_divination_reflection.sql -- Module: Divination & Reflection (Contract divination-reflection.md Chapter 7)
 -- Divination Record, Reading, Analysis, Reading Remark, Story Person, Storyline.
 --
 -- Tests in this file:
@@ -68,7 +68,7 @@ begin
   end if;
 end $f$;
 
--- Today in Asia/Kuala_Lumpur (Contract 1.7 item 4).
+-- Today in Asia/Kuala_Lumpur (Contract shared.md 1.7 item 4).
 create function pg_temp.today() returns date language sql as
 $f$ select (now() at time zone 'Asia/Kuala_Lumpur')::date $f$;
 

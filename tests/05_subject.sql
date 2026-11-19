@@ -1,5 +1,5 @@
 -- =============================================================================
--- tests/05_subject.sql -- Module: Subject (Contract Chapter 5)
+-- tests/05_subject.sql -- Module: Subject (Contract shared.md Chapter 5)
 -- Discovery, Alias, existence check, update, duplicate merge, delete.
 --
 -- Tests in this file:
@@ -57,7 +57,7 @@ begin
   end if;
 end $f$;
 
--- Today in Asia/Kuala_Lumpur (Contract 1.7 item 4).
+-- Today in Asia/Kuala_Lumpur (Contract shared.md 1.7 item 4).
 create function pg_temp.today() returns date language sql as
 $f$ select (now() at time zone 'Asia/Kuala_Lumpur')::date $f$;
 

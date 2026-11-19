@@ -1,5 +1,5 @@
 -- =============================================================================
--- tests/02_memory.sql -- Module: LifeOS Memory (Contract Chapter 2)
+-- tests/02_memory.sql -- Module: LifeOS Memory (Contract lifeos-memory.md Chapter 2)
 --
 -- Tests in this file:
 --   1. memory_create_defaults_and_read
@@ -53,7 +53,7 @@ begin
   end if;
 end $f$;
 
--- Today in Asia/Kuala_Lumpur (Contract 1.7 item 4).
+-- Today in Asia/Kuala_Lumpur (Contract shared.md 1.7 item 4).
 create function pg_temp.today() returns date language sql as
 $f$ select (now() at time zone 'Asia/Kuala_Lumpur')::date $f$;
 

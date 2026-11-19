@@ -182,7 +182,7 @@ create function pg_temp.link(p_ft text, p_fid uuid, p_tt text, p_tid uuid) retur
   select lifeos.record_link_create(jsonb_build_object('from_type', p_ft, 'from_id', p_fid, 'to_type', p_tt, 'to_id', p_tid))
 $f$;
 
--- Number of entries with this id in a JSON array (Timeline subjects or 4.5.3 links).
+-- Number of entries with this id in a JSON array (Timeline subjects or Contract shared.md 4.5.3 links).
 create function pg_temp.cnt(p_arr jsonb, p_id uuid) returns int language sql as $f$
   select count(*)::int from jsonb_array_elements(coalesce(p_arr, '[]'::jsonb)) e where e->>'id' = p_id::text
 $f$;
@@ -484,7 +484,7 @@ exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
 -- =============================================================================
--- M-0021 D6: each connected Subject appears once per Record (Contract 1.5 item 15)
+-- M-0021 D6: each connected Subject appears once per Record (Contract shared.md 1.5 item 15)
 -- Period 2031-05-01 to 2031-05-03.
 -- =============================================================================
 do $t$
@@ -605,7 +605,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D6-8 (Contract 1.5 item 15): observation_read links list X once.
+-- D6-8 (Contract shared.md 1.5 item 15): observation_read links list X once.
 do $t$
 declare t constant text := 'qa_d6_8_observation_read_links_subject_once';
   r jsonb;
@@ -616,7 +616,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D6-9 (Contract 1.5 item 15): expense_read links list Y once.
+-- D6-9 (Contract shared.md 1.5 item 15): expense_read links list Y once.
 do $t$
 declare t constant text := 'qa_d6_9_expense_read_links_subject_once';
   r jsonb;
@@ -627,7 +627,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D6-10 (Contract 4.5.3 item 5): record_links_read on the Expense lists Y once.
+-- D6-10 (Contract shared.md 4.5.3 item 5): record_links_read on the Expense lists Y once.
 do $t$
 declare t constant text := 'qa_d6_10_record_links_read_expense_subject_once';
   r jsonb;
@@ -638,7 +638,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D6-11 (Contract 1.5 item 15): divination_record_read Reading links list Z once.
+-- D6-11 (Contract shared.md 1.5 item 15): divination_record_read Reading links list Z once.
 do $t$
 declare t constant text := 'qa_d6_11_divination_record_read_reading_links_subject_once';
   rd jsonb;
@@ -793,7 +793,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D7-10 (Contract 6.7 item 2): deleting the deleted purchase again changes nothing.
+-- D7-10 (Contract financial-records.md 6.7 item 2): deleting the deleted purchase again changes nothing.
 do $t$
 declare t constant text := 'qa_d7_10_second_purchase_delete_changes_nothing';
   d jsonb; h jsonb;
@@ -884,7 +884,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D8-5 (Contract 7.5.4 item 1): an omitted start keeps its stored value for the check.
+-- D8-5 (Contract divination-reflection.md 7.5.4 item 1): an omitted start keeps its stored value for the check.
 do $t$
 declare t constant text := 'qa_d8_5_update_end_before_stored_start_rejected';
 begin
@@ -893,7 +893,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D8-6 (Contract 7.5.4 item 1): an omitted end keeps its stored value for the check.
+-- D8-6 (Contract divination-reflection.md 7.5.4 item 1): an omitted end keeps its stored value for the check.
 do $t$
 declare t constant text := 'qa_d8_6_update_start_after_stored_end_rejected';
 begin
@@ -1070,7 +1070,7 @@ begin
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;
 
--- D9-7 (Contract 4.2.6 item 2): the stored schedule_id of E2 is cleared. Reads lifeos.events.
+-- D9-7 (Contract personal-records.md 4.2.6 item 2): the stored schedule_id of E2 is cleared. Reads lifeos.events.
 do $t$
 declare t constant text := 'qa_d9_7_stored_event_schedule_id_cleared_for_deleted_schedule';
   v uuid; found_row boolean;

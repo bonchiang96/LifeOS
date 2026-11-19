@@ -1,5 +1,5 @@
 -- =============================================================================
--- tests/04_personal_records.sql -- Module: Personal Records (Contract Chapter 4)
+-- tests/04_personal_records.sql -- Module: Personal Records (Contract personal-records.md 4.1 to 4.4, shared.md 4.5 and 4.6)
 -- Schedule, Event, Observation, Note, Record links, Remarks, deletion.
 --
 -- Tests in this file:
@@ -79,7 +79,7 @@ begin
   end if;
 end $f$;
 
--- Today in Asia/Kuala_Lumpur (Contract 1.7 item 4).
+-- Today in Asia/Kuala_Lumpur (Contract shared.md 1.7 item 4).
 create function pg_temp.today() returns date language sql as
 $f$ select (now() at time zone 'Asia/Kuala_Lumpur')::date $f$;
 
@@ -561,7 +561,7 @@ begin
   r := lifeos.record_add_remark('schedule', (s->>'id')::uuid, 'and the tickets');
   perform pg_temp.chk(jsonb_array_length(r->'remarks') = 2, 'a second Remark is appended');
   perform pg_temp.chk(r->>'title' = 'Visit museum' and r->>'planned_date' = '2032-02-01', 'the Record content is unchanged');
-  -- Remarks given at create time follow 1.5 item 10
+  -- Remarks given at create time follow Contract shared.md 1.5 item 10
   e := lifeos.event_create('{"title":"Museum","occurred_date":"2032-02-01","remarks":["plain string",{"text":"object form","timestamp":"2032-02-01T08:00:00+08:00"}]}');
   perform pg_temp.chk(jsonb_array_length(e->'remarks') = 2 and e->'remarks'->0->>'text' = 'plain string' and e->'remarks'->0->>'timestamp' is not null, 'string Remark gets a timestamp');
   perform pg_temp.chk(e->'remarks'->1->>'timestamp' like '2032-02-01T00:00:00%', 'a supplied timestamp is normalised to UTC, got ' || (e->'remarks'->1->>'timestamp'));

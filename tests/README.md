@@ -8,17 +8,17 @@ The tests call only functions of the schema `lifeos`. Error tests compare the ex
 
 ## Files
 
-| File | Module | Contract chapter | Tests |
+| File | Module | Contract file and chapter | Tests |
 |---|---|---|---|
-| `02_memory.sql` | LifeOS Memory | 2 | 5 |
-| `03_notebook.sql` | Notebook | 3 | 8 |
-| `04_personal_records.sql` | Personal Records | 4 | 23 |
-| `05_subject.sql` | Subject | 5 | 9 |
-| `06_financial_records.sql` | Financial Records | 6 | 19 |
-| `07_divination_reflection.sql` | Divination & Reflection | 7 | 17 |
-| `08_communication_assistant.sql` | Communication Assistant | 8 | 13 |
-| `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | 9 | 11 |
-| `10_qa_regression.sql` | QA regression of M-0021 D4 to D10 and M-0022 D4 | 1, 4 to 9 | 103 |
+| `02_memory.sql` | LifeOS Memory | lifeos-memory.md 2 | 5 |
+| `03_notebook.sql` | Notebook | notebook.md 3 | 8 |
+| `04_personal_records.sql` | Personal Records | personal-records.md 4.1 to 4.4, shared.md 4.5 and 4.6 | 23 |
+| `05_subject.sql` | Subject | shared.md 5 | 9 |
+| `06_financial_records.sql` | Financial Records | financial-records.md 6 | 19 |
+| `07_divination_reflection.sql` | Divination & Reflection | divination-reflection.md 7 | 17 |
+| `08_communication_assistant.sql` | Communication Assistant | communication-assistant.md 8 | 13 |
+| `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | shared.md 9 | 11 |
+| `10_qa_regression.sql` | QA regression of M-0021 D4 to D10 and M-0022 D4 | shared.md 1, 4.5, 4.6, 5 and 9; personal-records.md 4.1 to 4.4; financial-records.md 6; divination-reflection.md 7; communication-assistant.md 8 | 103 |
 
 Total: 208 tests in 9 files.
 

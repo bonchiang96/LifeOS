@@ -1,5 +1,5 @@
 -- =============================================================================
--- tests/09_timeline_shared_retrieval.sql -- Module: Timeline and Shared Retrieval (Contract Chapter 9)
+-- tests/09_timeline_shared_retrieval.sql -- Module: Timeline and Shared Retrieval (Contract shared.md Chapter 9)
 -- timeline and subject_records.
 --
 -- Tests in this file:
@@ -59,7 +59,7 @@ begin
   end if;
 end $f$;
 
--- Today in Asia/Kuala_Lumpur (Contract 1.7 item 4).
+-- Today in Asia/Kuala_Lumpur (Contract shared.md 1.7 item 4).
 create function pg_temp.today() returns date language sql as
 $f$ select (now() at time zone 'Asia/Kuala_Lumpur')::date $f$;
 

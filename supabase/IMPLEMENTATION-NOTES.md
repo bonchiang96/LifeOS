@@ -35,6 +35,6 @@ An AI Agent reads this file before it changes the baseline or writes a migration
 
 ## 6. Links and search filters
 
-17. `_links` builds every `links` list and the Timeline `subjects`. It returns each Subject once, keyed by Subject `id`. Its fixed `via` order follows Contract 1.5 item 15. `record_links_read` on a Subject lists each connected Record once. Each entry has `via_list`, every path to that Record in this order: `record_link`, `observation_subject`, `payment_method`, `merchant`, `line_item`, `story_person_subject`, `person_profile_subject`. `via` is `via_list[0]` (M-0022 D4). On a Record, `record_links_read` returns the `_links` list unchanged.
+17. `_links` builds every `links` list and the Timeline `subjects`. It returns each Subject once, keyed by Subject `id`. Its fixed `via` order follows Contract shared.md 1.5 item 15. `record_links_read` on a Subject lists each connected Record once. Each entry has `via_list`, every path to that Record in this order: `record_link`, `observation_subject`, `payment_method`, `merchant`, `line_item`, `story_person_subject`, `person_profile_subject`. `via` is `via_list[0]` (M-0022 D4). On a Record, `record_links_read` returns the `_links` list unchanged.
 18. Every search filter by a reference ID also checks that the target Record is active. This holds with `include_deleted = true` too. A new search function follows this rule.
 19. `record_link_create` is the only function that inserts into `record_links`. It holds every rejected pair. A new function that inserts a Record link applies the same checks.

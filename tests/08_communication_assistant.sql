@@ -1,5 +1,5 @@
 -- =============================================================================
--- tests/08_communication_assistant.sql -- Module: Communication Assistant (Contract Chapter 8)
+-- tests/08_communication_assistant.sql -- Module: Communication Assistant (Contract communication-assistant.md Chapter 8)
 -- Profiles, Audience inheritance, Rules, Rule resolution, message finalize, history.
 --
 -- Tests in this file:
@@ -65,7 +65,7 @@ begin
   end if;
 end $f$;
 
--- Today in Asia/Kuala_Lumpur (Contract 1.7 item 4).
+-- Today in Asia/Kuala_Lumpur (Contract shared.md 1.7 item 4).
 create function pg_temp.today() returns date language sql as
 $f$ select (now() at time zone 'Asia/Kuala_Lumpur')::date $f$;
 
