@@ -24,6 +24,8 @@
 --   19. record_link_create_rejects_divination_record_storyline_pair
 --   20. event_delete_keeps_status_of_deleted_schedule
 --   21. event_and_observation_search_filter_by_deleted_record_id_matches_nothing
+--   22. record_links_read_on_subject_lists_each_record_once_with_every_path
+--   23. record_links_read_on_record_lists_each_subject_once_without_via_list
 --
 -- Test setup that the Contract has no function for: test 13 moves created_at of
 -- one Note into the past, so the Note date can be told apart from today inside a
@@ -771,6 +773,100 @@ begin
   r := lifeos.observation_search('{"observation_name":"d10metric","from_date":"2032-05-01","to_date":"2032-05-01"}');
   perform pg_temp.chk((r->>'returned_count')::int = 1 and r->'results'->0->>'id' = ob->>'id', 'the Observation stays findable by name and dates');
   perform pg_temp.chk((lifeos.observation_search(jsonb_build_object('subject_id', gen_random_uuid()))->>'returned_count')::int = 0, 'an unknown ID matches nothing');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 22. record_links_read on a Subject lists each Record once with every path (M-0022 D4) -----------
+do $t$
+declare t constant text := 'record_links_read_on_subject_lists_each_record_once_with_every_path';
+  c uuid; ex jsonb; ex2 jsonb; ex3 jsonb; ob jsonb; n jsonb; sp jsonb; pr jsonb; rl jsonb; l jsonb; vias text[];
+begin
+  c := ((lifeos.subject_create('{"name":"D4 person and card","subject_type":"person"}'))->>'id')::uuid;
+  -- an Expense whose Payment Method, Merchant and two Line Items are the Subject, plus a Record link to it
+  ex := lifeos.expense_create(jsonb_build_object('transaction_date','2032-06-01','payment_method_subject_id', c,'merchant_subject_id', c,
+        'expense_total', 15,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',10,'line_total',10,'category','other','item_subject_id', c),
+                                   jsonb_build_object('line_type','item','unit_price',5,'line_total',5,'category','other','item_subject_id', c))));
+  perform lifeos.record_link_create(jsonb_build_object('from_type','subject','from_id', c,'to_type','expense','to_id', ex->>'id'));
+  -- an Expense whose Payment Method and Merchant are the Subject, without a Record link
+  ex2 := lifeos.expense_create(jsonb_build_object('transaction_date','2032-06-02','payment_method_subject_id', c,'merchant_subject_id', c,
+        'expense_total', 7,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',7,'line_total',7,'category','food'))));
+  -- an Expense that one path reaches
+  ex3 := lifeos.expense_create(jsonb_build_object('transaction_date','2032-06-03','payment_method_subject_id', c,
+        'expense_total', 3,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',3,'line_total',3,'category','food'))));
+  -- an Observation of the Subject that is also linked by a Record link
+  ob := lifeos.observation_create(jsonb_build_object('subject_id', c,'observation_name','d4 weight','value_numeric',70,'observed_date','2032-06-01'));
+  perform lifeos.record_link_create(jsonb_build_object('from_type','observation','from_id', ob->>'id','to_type','subject','to_id', c));
+  -- a Note, a Story Person and a Person Profile that one path each reaches
+  n := lifeos.note_create('{"note_type":"General","content":"D4 note"}');
+  perform lifeos.record_link_create(jsonb_build_object('from_type','note','from_id', n->>'id','to_type','subject','to_id', c));
+  sp := lifeos.story_person_create(jsonb_build_object('name','D4 story person','subject_id', c));
+  pr := lifeos.communication_profile_create(jsonb_build_object('profile_key','m0022-d4-person','profile_type','person','name','D4 person','person_subject_id', c));
+
+  rl := lifeos.record_links_read('subject', c);
+  perform pg_temp.chk(rl->>'record_type' = 'subject' and rl->>'id' = c::text, 'the return names the Subject');
+  perform pg_temp.chk(jsonb_array_length(rl->'links') = 7, 'seven connected Records, got ' || jsonb_array_length(rl->'links'));
+  perform pg_temp.chk((select count(*) = count(distinct (x->>'record_type') || '/' || (x->>'id')) from jsonb_array_elements(rl->'links') x), 'each connected Record appears once');
+  perform pg_temp.chk((select bool_and(x->>'via' = x->'via_list'->>0) from jsonb_array_elements(rl->'links') x), 'via is the first path of via_list');
+
+  -- several paths: every path in the fixed order
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = ex->>'id';
+  perform pg_temp.chk(l->'via_list' = '["record_link","payment_method","merchant","line_item"]'::jsonb, 'the linked Expense keeps every path in order, got ' || coalesce((l->'via_list')::text, 'null'));
+  perform pg_temp.chk(l->>'via' = 'record_link' and l->>'record_type' = 'expense' and l->>'summary' = 'Expense MYR 15' and l->>'occurrence_date' = '2032-06-01', 'the other fields stay as before');
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = ex2->>'id';
+  perform pg_temp.chk(l->'via_list' = '["payment_method","merchant"]'::jsonb and l->>'via' = 'payment_method', 'Payment Method comes before Merchant');
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = ob->>'id';
+  perform pg_temp.chk(l->'via_list' = '["record_link","observation_subject"]'::jsonb and l->>'record_type' = 'observation', 'the linked Observation keeps both paths');
+  -- one path: via_list holds that path
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = ex3->>'id';
+  perform pg_temp.chk(l->'via_list' = '["payment_method"]'::jsonb, 'one path gives a via_list of one');
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = n->>'id';
+  perform pg_temp.chk(l->'via_list' = '["record_link"]'::jsonb and l->>'record_type' = 'note', 'a Record link alone');
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = sp->>'id';
+  perform pg_temp.chk(l->'via_list' = '["story_person_subject"]'::jsonb and l->>'record_type' = 'story_person', 'the Story Person');
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = pr->>'id';
+  perform pg_temp.chk(l->'via_list' = '["person_profile_subject"]'::jsonb and l->>'record_type' = 'communication_profile', 'the Person Profile');
+
+  -- order: via, then record_type, as before
+  select array_agg(x->>'via' || '/' || (x->>'record_type') order by o) into vias from jsonb_array_elements(rl->'links') with ordinality e(x, o);
+  perform pg_temp.chk(vias = (select array_agg(v order by v) from unnest(vias) v), 'links ordered by via and record_type, got ' || array_to_string(vias, ', '));
+
+  -- a deleted Record is omitted; a removed Record link leaves the other paths
+  perform lifeos.expense_delete((ex3->>'id')::uuid, 'D4 test');
+  perform lifeos.record_link_delete(jsonb_build_object('from_type','expense','from_id', ex->>'id','to_type','subject','to_id', c));
+  rl := lifeos.record_links_read('subject', c);
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(rl->'links') x where x->>'id' = ex3->>'id'), 'a deleted Expense is omitted');
+  select x into l from jsonb_array_elements(rl->'links') x where x->>'id' = ex->>'id';
+  perform pg_temp.chk(l->'via_list' = '["payment_method","merchant","line_item"]'::jsonb and l->>'via' = 'payment_method', 'without the Record link the next path leads');
+  perform pg_temp.pass(t);
+exception when others then perform pg_temp.fail(t, sqlerrm);
+end $t$;
+
+-- 23. record_links_read on a Record is unchanged by M-0022 D4 ----------------------------------------
+do $t$
+declare t constant text := 'record_links_read_on_record_lists_each_subject_once_without_via_list';
+  c uuid; ex jsonb; ev jsonb; rl jsonb;
+begin
+  c := ((lifeos.subject_create('{"name":"D4 card","subject_type":"payment method"}'))->>'id')::uuid;
+  ex := lifeos.expense_create(jsonb_build_object('transaction_date','2032-06-04','payment_method_subject_id', c,'merchant_subject_id', c,
+        'expense_total', 9,'currency','MYR',
+        'lines', jsonb_build_array(jsonb_build_object('line_type','item','unit_price',9,'line_total',9,'category','food','item_subject_id', c))));
+  ev := lifeos.event_create('{"title":"D4 lunch","occurred_date":"2032-06-04"}');
+  perform lifeos.record_link_create(jsonb_build_object('from_type','expense','from_id', ex->>'id','to_type','event','to_id', ev->>'id'));
+  rl := lifeos.record_links_read('expense', (ex->>'id')::uuid);
+  perform pg_temp.chk(jsonb_array_length(rl->'links') = 2, 'the Expense lists its Subject once and its Event, got ' || jsonb_array_length(rl->'links'));
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(rl->'links') x where x->>'id' = c::text and x->>'via' = 'payment_method'), 'the Subject carries the first path');
+  perform pg_temp.chk(exists (select 1 from jsonb_array_elements(rl->'links') x where x->>'id' = ev->>'id' and x->>'via' = 'record_link'), 'the Event is a Record link');
+  perform pg_temp.chk(not exists (select 1 from jsonb_array_elements(rl->'links') x where x ? 'via_list'), 'a Record return has no via_list');
+  perform pg_temp.chk((select bool_and((select array_agg(k order by k) from jsonb_object_keys(x) k) = array['id','occurrence_date','record_type','summary','via'])
+                       from jsonb_array_elements(rl->'links') x), 'each entry keeps the 4.5.3 fields');
+  -- the other Record side, an unknown Record Type and an unknown Subject
+  perform pg_temp.chk(jsonb_array_length(lifeos.record_links_read('event', (ev->>'id')::uuid)->'links') = 1, 'the Event lists the Expense');
+  perform pg_temp.expect_err(format($$select lifeos.record_links_read('story_person', %L::uuid)$$, c), 'invalid input');
+  perform pg_temp.expect_err($$select lifeos.record_links_read('subject', gen_random_uuid())$$, 'record not found');
   perform pg_temp.pass(t);
 exception when others then perform pg_temp.fail(t, sqlerrm);
 end $t$;

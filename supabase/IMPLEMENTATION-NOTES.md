@@ -1,6 +1,6 @@
 # LifeOS SQL Implementation Notes
 
-An AI Agent reads this file before it writes or changes a migration in `supabase/migrations/`, to keep the database consistent.
+An AI Agent reads this file before it changes the baseline or writes a migration in `supabase/migrations/`, to keep the database consistent.
 
 ## 1. Contract and schema
 
@@ -20,21 +20,21 @@ An AI Agent reads this file before it writes or changes a migration in `supabase
 
 9. `story_person_ids` on Readings and Storylines are stored in join tables.
 10. A check constraint on Expense Line `category` uses the 17 Categories.
-11. Every stored Remark in a `remarks` array carries a `remark_id` from `gen_random_uuid()`. Every function that stores a Remark assigns it, including create input and `record_add_remark`. Input never supplies it. A migration gives each existing Remark a `remark_id`.
+11. Every stored Remark in a `remarks` array carries a `remark_id` from `gen_random_uuid()`. Every function that stores a Remark assigns it, including create input and `record_add_remark`. Input never supplies it.
 
 ## 4. Seed data
 
-12. The migrations create two Notebooks. The `defaults` Notebook holds the content `currency: MYR`. The `note_types` Notebook holds `Idea`, `Feeling`, `Experience`, `Explanation` and `General`, one per line.
+12. The baseline creates two Notebooks. The `defaults` Notebook holds the content `currency: MYR`. The `note_types` Notebook holds `Idea`, `Feeling`, `Experience`, `Explanation` and `General`, one per line.
 
-## 5. Migration order
+## 5. Baseline and migrations
 
-13. Files in `supabase/migrations/` run in name order, one file at a time.
-14. A fix to an applied build is a new migration file. It uses `create or replace function` with the same signature.
-15. The tests in `tests/` run after all migrations. Each test file ends with a rollback and leaves no data.
-16. A migration that creates a new function revokes `EXECUTE` on it from `PUBLIC`, `anon` and `authenticated`. It then grants `EXECUTE` to `anon` and `authenticated` only when the function is a Contract function. `create or replace function` on an existing function keeps its grants.
+13. `supabase/migrations/` holds one baseline file, `20261119000100_lifeos_baseline.sql`. It builds the whole `lifeos` schema on a project without it (M-0022 D6).
+14. Until LifeOS goes live, a fix changes the baseline, and the dev `lifeos` schema is dropped and rebuilt from it. After go-live, a fix is a new migration file that runs after the baseline in name order. It uses `create or replace function` with the same signature.
+15. The tests in `tests/` run after the baseline and every later migration. Each test file ends with a rollback and leaves no data.
+16. The baseline grants `EXECUTE` on every Contract function in its Grants section. A migration that creates a new function revokes `EXECUTE` on it from `PUBLIC`, `anon` and `authenticated`. It then grants `EXECUTE` to `anon` and `authenticated` only when the function is a Contract function. `create or replace function` on an existing function keeps its grants.
 
 ## 6. Links and search filters
 
-17. `_links` builds every `links` list and the Timeline `subjects`. It returns each Subject once, keyed by Subject `id`. Its fixed `via` order follows Contract 1.5 item 15.
+17. `_links` builds every `links` list and the Timeline `subjects`. It returns each Subject once, keyed by Subject `id`. Its fixed `via` order follows Contract 1.5 item 15. `record_links_read` on a Subject lists each connected Record once. Each entry has `via_list`, every path to that Record in this order: `record_link`, `observation_subject`, `payment_method`, `merchant`, `line_item`, `story_person_subject`, `person_profile_subject`. `via` is `via_list[0]` (M-0022 D4). On a Record, `record_links_read` returns the `_links` list unchanged.
 18. Every search filter by a reference ID also checks that the target Record is active. This holds with `include_deleted = true` too. A new search function follows this rule.
 19. `record_link_create` is the only function that inserts into `record_links`. It holds every rejected pair. A new function that inserts a Record link applies the same checks.

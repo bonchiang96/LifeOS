@@ -12,12 +12,15 @@ The tests call only functions of the schema `lifeos`. Error tests compare the ex
 |---|---|---|---|
 | `02_memory.sql` | LifeOS Memory | 2 | 5 |
 | `03_notebook.sql` | Notebook | 3 | 8 |
-| `04_personal_records.sql` | Personal Records | 4 | 21 |
+| `04_personal_records.sql` | Personal Records | 4 | 23 |
 | `05_subject.sql` | Subject | 5 | 9 |
 | `06_financial_records.sql` | Financial Records | 6 | 19 |
 | `07_divination_reflection.sql` | Divination & Reflection | 7 | 17 |
 | `08_communication_assistant.sql` | Communication Assistant | 8 | 13 |
 | `09_timeline_shared_retrieval.sql` | Timeline and Shared Retrieval | 9 | 11 |
+| `10_qa_regression.sql` | QA regression of M-0021 D4 to D10 and M-0022 D4 | 1, 4 to 9 | 103 |
+
+Total: 208 tests in 9 files.
 
 ## How each file works
 
@@ -49,6 +52,7 @@ Some setups use a direct read, `update` or `delete` because the Contract has no 
 6. `04_personal_records.sql`, test 17, moves `updated_at` of one Schedule, and `created_at` and `updated_at` of one Note. A transaction has one clock value, so this is the only way to show that a Remark change or removal leaves these dates unchanged.
 7. `07_divination_reflection.sql`, tests 13, 14 and 15, each move `updated_at` of one Reading. A transaction has one clock value, so only this shows that `updated_at` stays unchanged. The three changes are a Reading Remark removal, a Story Person change and a Reading Remark change.
 8. `04_personal_records.sql`, test 20, reads `lifeos.events`. This shows that the stored `schedule_id` of a deleted Event is cleared.
+9. `10_qa_regression.sql`: `qa_d5_5` reads `lifeos.record_links`, `qa_d9_3` and `qa_d9_7` read `lifeos.events`, and `qa_d9_6` reads `lifeos.schedules`. These reads check stored values that no Contract return shows.
 
 ## Coverage
 
@@ -88,6 +92,8 @@ Some setups use a direct read, `update` or `delete` because the Contract has no 
 | No Record link between a Reading and a Storyline | `record_link_create_rejects_reading_storyline_pair` | `04_personal_records.sql` |
 | No Record link between a Divination Record and a Storyline | `record_link_create_rejects_divination_record_storyline_pair` | `04_personal_records.sql` |
 | Event and Observation search by a deleted Record ID | `event_and_observation_search_filter_by_deleted_record_id_matches_nothing` | `04_personal_records.sql` |
+| Each Record once in Subject links, with every path in `via_list` | `record_links_read_on_subject_lists_each_record_once_with_every_path` | `04_personal_records.sql` |
+| Record links of a Record keep one Subject and no `via_list` | `record_links_read_on_record_lists_each_subject_once_without_via_list` | `04_personal_records.sql` |
 | Subject create and single user Subject | `subject_create_defaults_and_single_user` | `05_subject.sql` |
 | Subject Discovery search | `subject_search_compact_and_exact_first` | `05_subject.sql` |
 | Subject Alias and existence check | `subject_alias_and_check` | `05_subject.sql` |
