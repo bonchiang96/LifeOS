@@ -1,0 +1,14 @@
+{
+  "name": "lifeos",
+  "owner": {
+    "name": "Rocher Lee"
+  },
+  "description": "Marketplace for the LifeOS Plugin, a personal operating system on Supabase.",
+  "plugins": [
+    {
+      "name": "lifeos",
+      "source": "./",
+      "description": "LifeOS personal operating system: Personal Records, Financial Records, Communication Assistant and Divination & Reflection on the LifeOS Supabase functions."
+    }
+  ]
+}
