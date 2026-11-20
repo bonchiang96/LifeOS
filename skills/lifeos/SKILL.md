@@ -73,10 +73,13 @@ Steps to connect:
 3. Read the value of `supabase_project_id`.
 4. Read `supabase_publishable_key` only when your connection method needs a key (shared.md 1.2).
 5. When the file is missing or has no `supabase_project_id`, tell the user that LifeOS is not configured.
-6. Then ask the user for the Supabase project ID, and use it for the connection.
-7. Choose a connection method, such as the platform's Supabase connector (shared.md 1.4).
-8. Call each function as an RPC function in the schema `lifeos`, with named parameters.
-9. Expect one `jsonb` value from every call.
+6. Then ask the user for the Supabase project ID.
+7. Create the LifeOS Config file in the user's Google Drive with that ID, in the format above.
+   When the file exists without `supabase_project_id`, add the field to it.
+8. Use the ID for the connection.
+9. Choose a connection method, such as the platform's Supabase connector (shared.md 1.4).
+10. Call each function as an RPC function in the schema `lifeos`, with named parameters.
+11. Expect one `jsonb` value from every call.
 
 Steps for the user Subject:
 
@@ -87,7 +90,7 @@ Steps for the user Subject:
 
 Every Record relates to the user, so the user Subject must exist. No wrong identity is possible for the user.
 
-Choices and approvals: the user Subject needs no separate approval.
+Choices and approvals: the LifeOS Config file and the user Subject need no separate approval.
 
 Outcome: every later flow calls the functions on the configured project and uses the user Subject.
 
