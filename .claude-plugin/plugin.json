@@ -1,7 +1,7 @@
 {
   "name": "lifeos",
   "displayName": "LifeOS",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "LifeOS is a personal operating system. Its Skills run Personal Records, Financial Records, Communication Assistant and Divination & Reflection through the LifeOS Supabase functions. Requires the LifeOS Config file from Google Drive and access to the LifeOS Supabase project.",
   "author": {
     "name": "Rocher Lee"

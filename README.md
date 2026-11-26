@@ -1,6 +1,6 @@
 # LifeOS
 
-LifeOS is a personal operating system. This repo is the LifeOS Plugin, D-0003. It uses the same structure as the AI with ME Plugin (M-0022 D7).
+LifeOS is a personal operating system. This repo is the LifeOS Plugin, LifeOS V2 (version 2.0.0). It uses the same structure as the AI with ME Plugin (M-0022 D7).
 
 A runtime Agent, such as Claude or ChatGPT, loads the Plugin. It starts with the `lifeos` entry Skill, which connects to the LifeOS Supabase project through the Google Drive file LifeOS Config. The Module Skills then run Personal Records, Financial Records, Communication Assistant and Divination & Reflection through the Contract functions in the `lifeos` schema.
 
@@ -27,6 +27,20 @@ In Claude Code:
 ```
 /plugin install lifeos --marketplace bonchiang96/lifeos
 ```
+
+## Set up your own LifeOS
+
+1. Create a Supabase project for your LifeOS data.
+2. Apply the baseline SQL to it, as described in the next section.
+3. Add `lifeos` to the project's Exposed schemas in the API settings.
+4. Install the Plugin and start a LifeOS conversation. On first use, the Agent asks for your Supabase project ID and creates the Google Drive file LifeOS Config.
+
+## Report a problem
+
+Choose one of two ways:
+
+1. Fill in the form [Report a problem](https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml) yourself.
+2. In your LifeOS conversation, say "report this problem". The Agent prepares the report without personal data and shows it to you. After you confirm it, the Agent sends it through a GitHub connector, or gives you a pre-filled link to submit.
 
 ## Apply the baseline
 

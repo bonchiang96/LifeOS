@@ -1,6 +1,6 @@
 ---
 name: lifeos
-description: Starts every LifeOS request. Connects to the LifeOS Supabase functions through the LifeOS Config file and routes the request to its Module Skill. Also runs Subject, Record links, Remarks, Timeline, Subject questions, LifeOS Memory and Notebook. Use whenever the user records, finds or asks about anything in LifeOS.
+description: Starts every LifeOS request. Connects to the LifeOS Supabase functions through the LifeOS Config file and routes the request to its Module Skill. Also runs Subject, Record links, Remarks, Timeline, Subject questions, LifeOS Memory, Notebook and problem reports. Use whenever the user records, finds or asks about anything in LifeOS, or reports a LifeOS problem.
 compatibility: Requires the LifeOS Supabase functions in the schema lifeos and the LifeOS Config file in Google Drive, read through the host's Google Drive connector.
 ---
 
@@ -27,6 +27,7 @@ This Skill owns the parts that every Module shares:
 4. Record links and Remarks (Sections 10 and 11).
 5. Timeline and Subject questions (Sections 12 to 14).
 6. The internal Modules LifeOS Memory and Notebook (Sections 15 and 16).
+7. Problem reports (Section 17).
 
 Use this Skill at the start of every LifeOS request. Then load the Module Skill that Section 5 names.
 
@@ -105,7 +106,7 @@ Steps:
 1. Retrieve relevant LifeOS Memory for the request (Section 15).
 2. Find the request in the shared.md 1.8 table. It names the function and the Contract file.
 3. Load the Module Skill that owns that Contract file (Section 1 table).
-4. Keep shared requests in this Skill: Subject, Record links, Remarks, Timeline, Memory and Notebook.
+4. Keep shared requests in this Skill: Subject, Record links, Remarks, Timeline, Memory, Notebook and problem reports.
 5. One statement may touch several Modules. Run each Module's flow, then link the Records (Section 10).
 
 Outcome: each part of the request runs in its owning Module, and every Record keeps its Module ownership.
@@ -406,3 +407,41 @@ Steps:
 Choices and approvals: Notebook maintenance needs no approval. It never replaces the user confirmation that a Subject or other Record operation needs.
 
 Outcome: Module flows reuse one consistent vocabulary.
+
+## 17. Report a problem
+
+Purpose: send a LifeOS problem to the issue list of the LifeOS repository.
+
+Input: the user says that LifeOS did something wrong and wants to report it, or asks how to report a problem.
+
+The issue list belongs to the repository `bonchiang96/LifeOS`. Its form "Report a problem" has these fields:
+
+| Field ID | Label | Content |
+|---|---|---|
+| `title` | Title | `[Problem] ` and one short line about the problem. |
+| `module` | Module | One option: `Personal Records (Schedule, Event, Observation, Note)`, `Financial Records (Expense, Refund, spending report)`, `Communication Assistant`, `Divination & Reflection`, `Timeline or questions about a person or thing`, `Setup (LifeOS Config, Supabase connection)` or `Not sure`. |
+| `what_said` | What you said or asked | The user's message to the Agent. |
+| `what_happened` | What the Agent did | What the Agent answered or saved, with any error message. |
+| `expected` | What you expected | What the user wanted instead. |
+| `platform` | AI platform | The platform in use, such as Claude or ChatGPT. |
+| `plugin_version` | LifeOS Plugin version | The `version` in the Plugin's `plugin.json`. |
+
+Steps:
+
+1. Offer the user two ways to report:
+   - The user fills in the form alone: give the link `https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml`.
+   - You prepare the report: continue with step 2.
+2. Fill in every field from the conversation.
+3. Replace personal data with placeholders. Personal data includes amounts, names, places, dates and Record content.
+4. Show the user the complete report: the title and every field, exactly as it will be sent.
+5. The user confirms the report or corrects it. Show the corrected report again until the user confirms it.
+6. Send the confirmed report:
+   - With a GitHub connector: create the issue in `bonchiang96/LifeOS` with the label `problem` and the fields as the issue body. Give the user the issue link.
+   - Without a GitHub connector: build the link `https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml` with each field as a URL-encoded query parameter named by its Field ID. Give the user the link. The user opens it and submits the form.
+
+Choices and approvals:
+
+1. The user chooses the way to report.
+2. The user confirms the complete report before you send it.
+
+Outcome: the problem is in the LifeOS issue list, with no personal data.
