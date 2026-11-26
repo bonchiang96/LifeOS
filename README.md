@@ -37,10 +37,12 @@ In Claude Code:
 
 ## Report a problem
 
-Choose one of two ways:
+In your LifeOS conversation, say "report this problem". The Agent prepares the report without personal data and shows it to you. After you confirm it, choose how to send it:
 
-1. Fill in the form [Report a problem](https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml) yourself.
-2. In your LifeOS conversation, say "report this problem". The Agent prepares the report without personal data and shows it to you. After you confirm it, the Agent sends it through a GitHub connector, or gives you a pre-filled link to submit.
+1. A pre-filled link that you open and submit.
+2. The Agent sends it through a GitHub connector, when you have one.
+
+Outside a LifeOS conversation, use the form [Report a problem](https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml).
 
 ## Apply the baseline
 

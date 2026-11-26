@@ -428,20 +428,21 @@ The issue list belongs to the repository `bonchiang96/LifeOS`. Its form "Report 
 
 Steps:
 
-1. Offer the user two ways to report:
-   - The user fills in the form alone: give the link `https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml`.
-   - You prepare the report: continue with step 2.
-2. Fill in every field from the conversation.
-3. Replace personal data with placeholders. Personal data includes amounts, names, places, dates and Record content.
-4. Show the user the complete report: the title and every field, exactly as it will be sent.
-5. The user confirms the report or corrects it. Show the corrected report again until the user confirms it.
-6. Send the confirmed report:
-   - With a GitHub connector: create the issue in `bonchiang96/LifeOS` with the label `problem` and the fields as the issue body. Give the user the issue link.
-   - Without a GitHub connector: build the link `https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml` with each field as a URL-encoded query parameter named by its Field ID. Give the user the link. The user opens it and submits the form.
+1. Fill in every field from the conversation.
+2. Replace personal data with placeholders. Personal data includes amounts, names, places, dates and Record content.
+3. Show the user the complete report: the title and every field, exactly as it will be sent.
+4. The user confirms the report or corrects it. Show the corrected report again until the user confirms it.
+5. Offer the user two ways to send the confirmed report:
+   - A pre-filled link: the user opens it and submits the form.
+   - The GitHub connector: you create the issue. Offer this way only when a GitHub connector is available.
+6. For a pre-filled link, build `https://github.com/bonchiang96/LifeOS/issues/new?template=bug_report.yml`.
+   Add each field as a URL-encoded query parameter named by its Field ID. Give the user the link.
+7. For the GitHub connector, create the issue in `bonchiang96/LifeOS` with the label `problem`.
+   Put the fields in the issue body. Give the user the issue link.
 
 Choices and approvals:
 
-1. The user chooses the way to report.
-2. The user confirms the complete report before you send it.
+1. The user confirms the complete report before it is sent.
+2. The user chooses the pre-filled link or the GitHub connector.
 
 Outcome: the problem is in the LifeOS issue list, with no personal data.
