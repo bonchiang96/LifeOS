@@ -1,0 +1,54 @@
+name: Report a problem
+description: Tell us what went wrong when you used LifeOS. Leave out personal data, such as amounts, names and record content.
+title: "[Problem] "
+labels: ["problem"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. Describe the problem in your own words, in any language.
+        Your AI Agent can also fill in this form for you: say "report this problem" in your LifeOS conversation.
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options:
+        - Personal Records (Schedule, Event, Observation, Note)
+        - Financial Records (Expense, Refund, spending report)
+        - Communication Assistant
+        - Divination & Reflection
+        - Timeline or questions about a person or thing
+        - Setup (LifeOS Config, Supabase connection)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what_said
+    attributes:
+      label: What you said or asked
+      description: Your message to the Agent. Replace personal data with placeholders.
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What the Agent did
+      description: What the Agent answered or saved. Include any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: AI platform
+      placeholder: Claude, ChatGPT, Claude Code ...
+  - type: input
+    id: plugin_version
+    attributes:
+      label: LifeOS Plugin version
+      placeholder: "2.0.0"
